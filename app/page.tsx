@@ -1,35 +1,35 @@
-"use client"
+"use client";
 
-import { useEffect, useState, Suspense } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
-import { ThemeToggle } from "@/components/theme-toggle"
-import { Shield, Trash2, Lock, Sparkles, Copy, Check } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
+import { useEffect, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { Shield, Trash2, Lock, Sparkles, Copy, Check } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 function HomePageContent() {
-  const [name, setName] = useState("")
-  const [roomId, setRoomId] = useState("")
-  const [copied, setCopied] = useState(false)
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const { toast } = useToast()
+  const [name, setName] = useState("");
+  const [roomId, setRoomId] = useState("");
+  const [copied, setCopied] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { toast } = useToast();
 
   // Prefill room ID when coming from a shared link like /?roomId=SECRET
   useEffect(() => {
-    const sharedRoomId = searchParams.get("roomId")
+    const sharedRoomId = searchParams.get("roomId");
     if (sharedRoomId) {
-      setRoomId(sharedRoomId.toUpperCase())
+      setRoomId(sharedRoomId.toUpperCase());
     }
-  }, [searchParams])
+  }, [searchParams]);
 
   const generateRoomId = () => {
-    const id = Math.random().toString(36).substring(2, 10).toUpperCase()
-    setRoomId(id)
-  }
+    const id = Math.random().toString(36).substring(2, 10).toUpperCase();
+    setRoomId(id);
+  };
 
   const handleJoinRoom = () => {
     if (!name.trim()) {
@@ -37,8 +37,8 @@ function HomePageContent() {
         title: "Name required",
         description: "Please enter your name to join the room.",
         variant: "destructive",
-      })
-      return
+      });
+      return;
     }
 
     if (!roomId.trim()) {
@@ -46,26 +46,26 @@ function HomePageContent() {
         title: "Room ID required",
         description: "Please enter or generate a room ID.",
         variant: "destructive",
-      })
-      return
+      });
+      return;
     }
 
     // Store user data in sessionStorage
-    sessionStorage.setItem("userName", name)
-    router.push(`/room/${roomId}`)
-  }
+    sessionStorage.setItem("userName", name);
+    router.push(`/room/${roomId}`);
+  };
 
   const copyRoomId = async () => {
     if (roomId) {
-      await navigator.clipboard.writeText(roomId)
-      setCopied(true)
+      await navigator.clipboard.writeText(roomId);
+      setCopied(true);
       toast({
         title: "Copied!",
         description: "Room ID copied to clipboard.",
-      })
-      setTimeout(() => setCopied(false), 2000)
+      });
+      setTimeout(() => setCopied(false), 2000);
     }
-  }
+  };
 
   return (
     <div className="relative min-h-screen bg-gradient-to-br from-background via-background to-primary/5 overflow-hidden">
@@ -85,25 +85,39 @@ function HomePageContent() {
             <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
               <Sparkles className="w-6 h-6 text-primary" />
             </div>
-            <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-balance">ChattingLord</h1>
+            <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-balance">
+              ChattingLord
+            </h1>
           </div>
           <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto text-balance">
-            Privacy-first ephemeral chat. Create temporary rooms for real-time collaboration.
-            <span className="block mt-2 text-sm">No permanent storage. Auto-delete when empty.</span>
+            Privacy-first ephemeral chat. Create temporary rooms for real-time
+            collaboration.
+            <span className="block mt-2 text-sm">
+              No permanent storage. Auto-delete when empty.
+            </span>
           </p>
         </div>
 
         {/* Privacy badges */}
         <div className="flex flex-wrap items-center justify-center gap-3 mb-10">
-          <Badge variant="secondary" className="flex items-center gap-1.5 px-3 py-1.5">
+          <Badge
+            variant="secondary"
+            className="flex items-center gap-1.5 px-3 py-1.5"
+          >
             <Lock className="w-3.5 h-3.5" />
             <span>End-to-end encrypted</span>
           </Badge>
-          <Badge variant="secondary" className="flex items-center gap-1.5 px-3 py-1.5">
+          <Badge
+            variant="secondary"
+            className="flex items-center gap-1.5 px-3 py-1.5"
+          >
             <Trash2 className="w-3.5 h-3.5" />
             <span>Auto-delete</span>
           </Badge>
-          <Badge variant="secondary" className="flex items-center gap-1.5 px-3 py-1.5">
+          <Badge
+            variant="secondary"
+            className="flex items-center gap-1.5 px-3 py-1.5"
+          >
             <Shield className="w-3.5 h-3.5" />
             <span>No data stored</span>
           </Badge>
@@ -148,17 +162,30 @@ function HomePageContent() {
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                       aria-label="Copy room ID"
                     >
-                      {copied ? <Check className="w-4 h-4 text-primary" /> : <Copy className="w-4 h-4" />}
+                      {copied ? (
+                        <Check className="w-4 h-4 text-primary" />
+                      ) : (
+                        <Copy className="w-4 h-4" />
+                      )}
                     </button>
                   )}
                 </div>
-                <Button type="button" variant="outline" onClick={generateRoomId} className="h-11 px-4 bg-transparent">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={generateRoomId}
+                  className="h-11 px-4 bg-transparent"
+                >
                   Generate
                 </Button>
               </div>
             </div>
 
-            <Button onClick={handleJoinRoom} className="w-full h-11 text-base font-medium" size="lg">
+            <Button
+              onClick={handleJoinRoom}
+              className="w-full h-11 text-base font-medium"
+              size="lg"
+            >
               Join Room
             </Button>
           </div>
@@ -185,7 +212,9 @@ function HomePageContent() {
               <Trash2 className="w-5 h-5 text-primary" />
             </div>
             <h3 className="font-semibold">Truly Ephemeral</h3>
-            <p className="text-sm text-muted-foreground">Rooms automatically delete when everyone leaves. No trace.</p>
+            <p className="text-sm text-muted-foreground">
+              Rooms automatically delete when everyone leaves. No trace.
+            </p>
           </div>
           <div className="text-center space-y-2">
             <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mx-auto mb-3">
@@ -199,20 +228,22 @@ function HomePageContent() {
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 export default function HomePage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading...</p>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading...</p>
+          </div>
         </div>
-      </div>
-    }>
+      }
+    >
       <HomePageContent />
     </Suspense>
-  )
+  );
 }
