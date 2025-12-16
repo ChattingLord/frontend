@@ -7,6 +7,12 @@ export interface Message {
   senderColor?: string
   timestamp: Date
   isSent?: boolean
+  fileData?: {
+    fileName: string
+    fileType: string
+    fileSize: number
+    data: string // base64 encoded file data
+  }
 }
 
 export interface Participant {

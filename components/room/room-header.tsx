@@ -49,10 +49,12 @@ export function RoomHeader({ roomId, participantCount, onToggleSidebar, onToggle
   }
 
   const shareRoom = async () => {
+    // Share a link that opens the landing page with the room prefilled
+    const shareUrl = `${window.location.origin}/?roomId=${encodeURIComponent(roomId)}`
     const shareData = {
       title: "Join my ChattingLord room",
       text: `Join my ephemeral chat room: ${roomId}`,
-      url: window.location.href,
+      url: shareUrl,
     }
 
     if (navigator.share) {

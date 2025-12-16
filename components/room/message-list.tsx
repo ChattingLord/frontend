@@ -2,9 +2,76 @@
 
 import { useEffect, useRef } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { Message } from "@/types/chat"
 import { formatDistanceToNow } from "date-fns"
+import { Download, File } from "lucide-react"
+
+// Helper function to format file size
+const formatFileSize = (bytes: number): string => {
+  if (bytes === 0) return "0 Bytes";
+  const k = 1024;
+  const sizes = ["Bytes", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + " " + sizes[i];
+};
+
+// Helper function to download file
+const downloadFile = (fileData: Message["fileData"]) => {
+  if (!fileData || !fileData.data) {
+    console.error("File data is missing or invalid");
+    return;
+  }
+
+  try {
+    // Decode base64 string
+    const base64Data = fileData.data;
+    const byteCharacters = atob(base64Data);
+    const byteNumbers = new Array(byteCharacters.length);
+    
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: fileData.fileType || "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    
+    // Create download link
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileData.fileName || "download";
+    link.style.display = "none";
+    
+    // Trigger download
+    document.body.appendChild(link);
+    link.click();
+    
+    // Cleanup
+    setTimeout(() => {
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }, 100);
+  } catch (error) {
+    console.error("Error downloading file:", error);
+    // Fallback: try to open the data URL directly
+    try {
+      const dataUrl = `data:${fileData.fileType};base64,${fileData.data}`;
+      const link = document.createElement("a");
+      link.href = dataUrl;
+      link.download = fileData.fileName || "download";
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        document.body.removeChild(link);
+      }, 100);
+    } catch (fallbackError) {
+      console.error("Fallback download also failed:", fallbackError);
+    }
+  }
+};
 
 interface MessageListProps {
   messages: Message[]
@@ -64,7 +131,71 @@ export function MessageList({ messages, currentUserId, isTyping, typingUserName 
                     : "bg-muted text-foreground rounded-tl-sm",
                 )}
               >
-                <p className="text-sm leading-relaxed break-words">{message.content}</p>
+                {message.fileData && message.fileData.data ? (
+                  <div className="space-y-2">
+                    {message.fileData.fileType && message.fileData.fileType.startsWith("image/") ? (
+                      <div className="rounded-lg overflow-hidden max-w-full">
+                        <img
+                          src={`data:${message.fileData.fileType};base64,${message.fileData.data}`}
+                          alt={message.fileData.fileName}
+                          className="max-w-full max-h-96 object-contain cursor-pointer"
+                          onClick={() => {
+                            const img = new Image();
+                            img.src = `data:${message.fileData!.fileType};base64,${message.fileData!.data}`;
+                            const w = window.open("");
+                            w?.document.write(img.outerHTML);
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <div 
+                        className={cn(
+                          "flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors",
+                          isSentByCurrentUser 
+                            ? "bg-primary-foreground/10 hover:bg-primary-foreground/20" 
+                            : "bg-background/50 hover:bg-background/70"
+                        )}
+                        onClick={() => downloadFile(message.fileData)}
+                        title="Click to download"
+                      >
+                        <File className={cn(
+                          "w-8 h-8 shrink-0",
+                          isSentByCurrentUser ? "text-primary-foreground" : ""
+                        )} />
+                        <div className="flex-1 min-w-0">
+                          <p className={cn(
+                            "text-sm font-medium truncate",
+                            isSentByCurrentUser ? "text-primary-foreground" : ""
+                          )}>{message.fileData.fileName}</p>
+                          <p className={cn(
+                            "text-xs opacity-80",
+                            isSentByCurrentUser ? "text-primary-foreground/80" : ""
+                          )}>{formatFileSize(message.fileData.fileSize)}</p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={cn(
+                            "h-8 w-8 shrink-0",
+                            isSentByCurrentUser ? "text-primary-foreground hover:bg-primary-foreground/20" : ""
+                          )}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            downloadFile(message.fileData);
+                          }}
+                          title="Download file"
+                        >
+                          <Download className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    )}
+                    {message.content && message.content !== message.fileData.fileName && (
+                      <p className="text-sm leading-relaxed break-words mt-2">{message.content}</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm leading-relaxed break-words">{message.content}</p>
+                )}
               </div>
               <span className="text-xs text-muted-foreground px-1">
                 {formatDistanceToNow(message.timestamp, { addSuffix: true })}

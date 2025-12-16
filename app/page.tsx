@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useEffect, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -15,7 +15,16 @@ export default function HomePage() {
   const [roomId, setRoomId] = useState("")
   const [copied, setCopied] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { toast } = useToast()
+
+  // Prefill room ID when coming from a shared link like /?roomId=SECRET
+  useEffect(() => {
+    const sharedRoomId = searchParams.get("roomId")
+    if (sharedRoomId) {
+      setRoomId(sharedRoomId.toUpperCase())
+    }
+  }, [searchParams])
 
   const generateRoomId = () => {
     const id = Math.random().toString(36).substring(2, 10).toUpperCase()

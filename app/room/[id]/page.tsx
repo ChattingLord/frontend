@@ -14,11 +14,16 @@ import { Send, Paperclip, Smile, ChevronRight } from "lucide-react";
 import type { Message, Participant } from "@/types/chat";
 import { getSocket, disconnectSocket } from "@/lib/socket";
 import { getUserColor } from "@/lib/user-colors";
+import { useToast } from "@/hooks/use-toast";
+// Emoji picker
+import data from "@emoji-mart/data";
+import Picker from "@emoji-mart/react";
 
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
   const roomId = params.id as string;
+  const { toast } = useToast();
   const [userName, setUserName] = useState("");
   const [userId, setUserId] = useState("");
   const [message, setMessage] = useState("");
@@ -28,8 +33,108 @@ export default function RoomPage() {
   const [isConnected, setIsConnected] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const messageInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const emojiPickerRef = useRef<HTMLDivElement | null>(null);
+
+  const handleToggleEmojiPicker = () => {
+    if (!isConnected) return;
+    setShowEmojiPicker((prev) => !prev);
+  };
+
+  const handleAttachClick = () => {
+    if (!isConnected) return;
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Check file size (limit to 10MB for base64 encoding)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      toast({
+        title: "File too large",
+        description: "Please select a file smaller than 10MB.",
+        variant: "destructive",
+      });
+      event.target.value = "";
+      return;
+    }
+
+    // Convert file to base64
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64Data = e.target?.result as string;
+      
+      // Extract base64 string (remove data:type;base64, prefix)
+      const base64String = base64Data.split(',')[1] || base64Data;
+
+      const fileData = {
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+        data: base64String,
+      };
+
+      // Send file message via Socket.IO (we rely on the server's new-message event
+      // to add the message to the UI, so we don't push a local copy here to avoid duplicates)
+      const socket = getSocket();
+      if (socket && socket.connected) {
+        socket.emit("send-message", {
+          roomId,
+          userId,
+          message: file.name, // Use filename as message text
+          type: "file",
+          fileData,
+        });
+      }
+    };
+
+    reader.onerror = () => {
+      toast({
+        title: "Error reading file",
+        description: "Could not read the selected file. Please try again.",
+        variant: "destructive",
+      });
+    };
+
+    reader.readAsDataURL(file);
+    event.target.value = "";
+  };
+
+  // Close emoji picker on outside click or Escape
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        emojiPickerRef.current &&
+        !emojiPickerRef.current.contains(event.target as Node)
+      ) {
+        setShowEmojiPicker(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowEmojiPicker(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showEmojiPicker]);
 
   useEffect(() => {
     // Get user name from sessionStorage
@@ -167,8 +272,26 @@ export default function RoomPage() {
         userId: string;
         message: string;
         type: string;
+        fileData?: {
+          fileName: string;
+          fileType: string;
+          fileSize: number;
+          data: string;
+        };
         timestamp: string;
       }) => {
+        if (data.roomId !== roomId) return;
+        
+        // Debug: Log file data if present
+        if (data.fileData) {
+          console.log("Received file message:", {
+            fileName: data.fileData.fileName,
+            fileType: data.fileData.fileType,
+            fileSize: data.fileData.fileSize,
+            dataLength: data.fileData.data?.length || 0,
+          });
+        }
+        
         const senderName = data.userId
           .replace(/-/g, " ")
           .replace(/\b\w/g, (l) => l.toUpperCase());
@@ -181,6 +304,7 @@ export default function RoomPage() {
           senderColor: getUserColor(data.userId),
           timestamp: new Date(data.timestamp),
           isSent: data.userId === currentUserId,
+          fileData: data.fileData,
         };
         setMessages((prev) => [...prev, newMessage]);
       }
@@ -319,6 +443,24 @@ export default function RoomPage() {
                     autoComplete="off"
                     disabled={!isConnected}
                   />
+                  {/* Emoji picker */}
+                  {showEmojiPicker && (
+                    <div
+                      ref={emojiPickerRef}
+                      className="absolute right-2 bottom-12 z-20"
+                    >
+                      <Picker
+                        data={data}
+                        theme="dark"
+                        onEmojiSelect={(emoji: any) => {
+                          setMessage((prev) => prev + (emoji.native || ""));
+                          if (messageInputRef.current) {
+                            messageInputRef.current.focus();
+                          }
+                        }}
+                      />
+                    </div>
+                  )}
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                     <Button
                       type="button"
@@ -327,6 +469,7 @@ export default function RoomPage() {
                       className="h-8 w-8"
                       aria-label="Add emoji"
                       disabled={!isConnected}
+                      onClick={handleToggleEmojiPicker}
                     >
                       <Smile className="w-4 h-4" />
                     </Button>
@@ -337,10 +480,18 @@ export default function RoomPage() {
                       className="h-8 w-8"
                       aria-label="Attach file"
                       disabled={!isConnected}
+                      onClick={handleAttachClick}
                     >
                       <Paperclip className="w-4 h-4" />
                     </Button>
                   </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    onChange={handleFileChange}
+                    accept="image/*,application/pdf,.doc,.docx,.txt"
+                  />
                 </div>
                 <Button
                   onClick={sendMessage}
