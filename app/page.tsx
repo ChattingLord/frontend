@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,7 +10,7 @@ import { ThemeToggle } from "@/components/theme-toggle"
 import { Shield, Trash2, Lock, Sparkles, Copy, Check } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
-export default function HomePage() {
+function HomePageContent() {
   const [name, setName] = useState("")
   const [roomId, setRoomId] = useState("")
   const [copied, setCopied] = useState(false)
@@ -199,5 +199,20 @@ export default function HomePage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    }>
+      <HomePageContent />
+    </Suspense>
   )
 }
