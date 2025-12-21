@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { RoomHeader } from "@/components/room/room-header";
 import { MessageList } from "@/components/room/message-list";
 import { VideoPanel } from "@/components/room/video-panel";
+import VideoCall from "@/components/video/VideoCall";
 import { ParticipantsSidebar } from "@/components/room/participants-sidebar";
 import { Send, Paperclip, Smile, ChevronRight } from "lucide-react";
 import type { Message, Participant } from "@/types/chat";
@@ -170,14 +171,14 @@ export default function RoomPage() {
         userCount: number;
         users: string[];
       }) => {
-        // Update participants list
+        // Update participants list - everyone starts with video and audio OFF
         const participantList: Participant[] = data.users.map((uid) => ({
           id: uid,
           name: uid.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
           color: getUserColor(uid),
           isOnline: true,
           isVideoOn: false,
-          isAudioOn: true,
+          isAudioOn: false,
         }));
         setParticipants(participantList);
 
@@ -203,13 +204,14 @@ export default function RoomPage() {
         userCount: number;
         users: string[];
       }) => {
+        // Everyone starts with video and audio OFF
         const participantList: Participant[] = data.users.map((uid) => ({
           id: uid,
           name: uid.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
           color: getUserColor(uid),
           isOnline: true,
           isVideoOn: false,
-          isAudioOn: true,
+          isAudioOn: false,
         }));
         setParticipants(participantList);
 
@@ -238,15 +240,24 @@ export default function RoomPage() {
         userCount: number;
         users: string[];
       }) => {
-        const participantList: Participant[] = data.users.map((uid) => ({
-          id: uid,
-          name: uid.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
-          color: getUserColor(uid),
-          isOnline: true,
-          isVideoOn: false,
-          isAudioOn: true,
-        }));
-        setParticipants(participantList);
+        // Preserve existing media states when someone leaves
+        setParticipants((prevParticipants) => {
+          const participantMap = new Map(
+            prevParticipants.map((p) => [p.id, p])
+          );
+          
+          return data.users.map((uid) => {
+            const existing = participantMap.get(uid);
+            return {
+              id: uid,
+              name: uid.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
+              color: getUserColor(uid),
+              isOnline: true,
+              isVideoOn: existing?.isVideoOn ?? false,
+              isAudioOn: existing?.isAudioOn ?? false,
+            };
+          });
+        });
 
         if (data.userId !== currentUserId) {
           setMessages((prev) => [
@@ -323,6 +334,22 @@ export default function RoomPage() {
       });
     });
 
+    // Media state changes
+    socket.on("user-media-state-changed", (data: { userId: string; isVideoOn: boolean; isAudioOn: boolean }) => {
+      setParticipants((prev) => {
+        return prev.map((participant) => {
+          if (participant.id === data.userId) {
+            return {
+              ...participant,
+              isVideoOn: data.isVideoOn,
+              isAudioOn: data.isAudioOn,
+            };
+          }
+          return participant;
+        });
+      });
+    });
+
     // Error handling
     socket.on("error", (error: { message: string }) => {
       console.error("Socket error:", error);
@@ -341,6 +368,7 @@ export default function RoomPage() {
       socket.off("user-left");
       socket.off("new-message");
       socket.off("user-typing");
+      socket.off("user-media-state-changed");
       socket.off("error");
       disconnectSocket();
     };
@@ -514,7 +542,26 @@ export default function RoomPage() {
           {/* Video panel */}
           {showVideo && (
             <div className="w-full md:w-96 lg:w-[28rem] bg-muted/30">
-              <VideoPanel participants={participants} />
+              {/* Use the WebRTC-powered VideoCall component */}
+              <VideoCall 
+                roomId={roomId} 
+                userId={userId}
+                onMediaStateChange={(videoOn, audioOn) => {
+                  // Update local user's media state in participants list
+                  setParticipants((prev) => {
+                    return prev.map((participant) => {
+                      if (participant.id === userId) {
+                        return {
+                          ...participant,
+                          isVideoOn: videoOn,
+                          isAudioOn: audioOn,
+                        };
+                      }
+                      return participant;
+                    });
+                  });
+                }}
+              />
             </div>
           )}
         </div>
