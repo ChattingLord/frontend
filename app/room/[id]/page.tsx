@@ -8,8 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RoomHeader } from "@/components/room/room-header";
 import { MessageList } from "@/components/room/message-list";
-import { VideoPanel } from "@/components/room/video-panel";
-import VideoCall from "@/components/video/VideoCall";
 import { ParticipantsSidebar } from "@/components/room/participants-sidebar";
 import { Send, Paperclip, Smile, ChevronRight } from "lucide-react";
 import type { Message, Participant } from "@/types/chat";
@@ -32,7 +30,6 @@ export default function RoomPage() {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [isConnected, setIsConnected] = useState(false);
-  const [showVideo, setShowVideo] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const messageInputRef = useRef<HTMLInputElement>(null);
@@ -249,10 +246,10 @@ export default function RoomPage() {
           return data.users.map((uid) => {
             const existing = participantMap.get(uid);
             return {
-              id: uid,
-              name: uid.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
-              color: getUserColor(uid),
-              isOnline: true,
+          id: uid,
+          name: uid.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
+          color: getUserColor(uid),
+          isOnline: true,
               isVideoOn: existing?.isVideoOn ?? false,
               isAudioOn: existing?.isAudioOn ?? false,
             };
@@ -438,16 +435,12 @@ export default function RoomPage() {
           roomId={roomId}
           participantCount={participants.length}
           onToggleSidebar={() => setShowSidebar(!showSidebar)}
-          onToggleVideo={() => setShowVideo(!showVideo)}
-          showVideo={showVideo}
           isConnected={isConnected}
         />
 
         <div className="flex-1 flex overflow-hidden">
           {/* Chat panel */}
-          <div
-            className={`flex-1 flex flex-col ${showVideo ? "border-r" : ""}`}
-          >
+          <div className="flex-1 flex flex-col">
             <MessageList
               messages={messages}
               currentUserId={userId}
@@ -538,40 +531,14 @@ export default function RoomPage() {
               )}
             </div>
           </div>
-
-          {/* Video panel */}
-          {showVideo && (
-            <div className="w-full md:w-96 lg:w-[28rem] bg-muted/30">
-              {/* Use the WebRTC-powered VideoCall component */}
-              <VideoCall 
-                roomId={roomId} 
-                userId={userId}
-                onMediaStateChange={(videoOn, audioOn) => {
-                  // Update local user's media state in participants list
-                  setParticipants((prev) => {
-                    return prev.map((participant) => {
-                      if (participant.id === userId) {
-                        return {
-                          ...participant,
-                          isVideoOn: videoOn,
-                          isAudioOn: audioOn,
-                        };
-                      }
-                      return participant;
-                    });
-                  });
-                }}
-              />
-            </div>
-          )}
         </div>
       </div>
 
       {/* Participants sidebar - mobile */}
       {showSidebar && (
-        <div className="absolute inset-y-0 right-0 w-80 bg-card border-l shadow-lg z-50 md:hidden">
+        <div className="absolute inset-y-0 right-0 w-80 bg-card border-l shadow-lg z-50 md:hidden flex flex-col">
           <div className="flex items-center justify-between p-4 border-b">
-            <h2 className="font-semibold">Participants</h2>
+            <h2 className="font-semibold">Participants ({participants.length})</h2>
             <Button
               variant="ghost"
               size="icon"
@@ -580,16 +547,38 @@ export default function RoomPage() {
               <ChevronRight className="w-5 h-5" />
             </Button>
           </div>
-          <ParticipantsSidebar participants={participants} />
+          <ParticipantsSidebar 
+            participants={participants}
+            roomId={roomId}
+            userId={userId}
+            onMediaStateChange={(videoOn, audioOn) => {
+              setParticipants((prev) =>
+                prev.map((p) =>
+                  p.id === userId ? { ...p, isVideoOn: videoOn, isAudioOn: audioOn } : p
+                )
+              );
+            }}
+          />
         </div>
       )}
 
       {/* Participants sidebar - desktop */}
-      <div className="hidden md:block w-72 border-l bg-card/30">
+      <div className="hidden md:flex md:flex-col w-80 border-l bg-card/30">
         <div className="p-4 border-b">
-          <h2 className="font-semibold">Participants</h2>
+          <h2 className="font-semibold">Participants ({participants.length})</h2>
         </div>
-        <ParticipantsSidebar participants={participants} />
+        <ParticipantsSidebar 
+          participants={participants}
+          roomId={roomId}
+          userId={userId}
+          onMediaStateChange={(videoOn, audioOn) => {
+            setParticipants((prev) =>
+              prev.map((p) =>
+                p.id === userId ? { ...p, isVideoOn: videoOn, isAudioOn: audioOn } : p
+              )
+            );
+          }}
+        />
       </div>
     </div>
   );

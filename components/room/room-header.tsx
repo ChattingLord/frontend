@@ -19,7 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Users, MoreVertical, Copy, Share2, Video, VideoOff, LogOut, Menu } from "lucide-react"
+import { Users, MoreVertical, Copy, Share2, LogOut, Menu } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { getSocket, disconnectSocket } from "@/lib/socket"
 
@@ -27,12 +27,10 @@ interface RoomHeaderProps {
   roomId: string
   participantCount: number
   onToggleSidebar: () => void
-  onToggleVideo: () => void
-  showVideo: boolean
   isConnected?: boolean
 }
 
-export function RoomHeader({ roomId, participantCount, onToggleSidebar, onToggleVideo, showVideo, isConnected = true }: RoomHeaderProps) {
+export function RoomHeader({ roomId, participantCount, onToggleSidebar, isConnected = true }: RoomHeaderProps) {
   const router = useRouter()
   const { toast } = useToast()
   const [showLeaveDialog, setShowLeaveDialog] = useState(false)
@@ -107,15 +105,6 @@ export function RoomHeader({ roomId, participantCount, onToggleSidebar, onToggle
           </div>
 
           <div className="flex items-center gap-2">
-            <Button
-              variant={showVideo ? "default" : "outline"}
-              size="icon"
-              onClick={onToggleVideo}
-              className="hidden md:flex"
-            >
-              {showVideo ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
-            </Button>
-
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon">
@@ -130,19 +119,6 @@ export function RoomHeader({ roomId, participantCount, onToggleSidebar, onToggle
                 <DropdownMenuItem onClick={shareRoom}>
                   <Share2 className="w-4 h-4 mr-2" />
                   Share Room
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={onToggleVideo} className="md:hidden">
-                  {showVideo ? (
-                    <>
-                      <VideoOff className="w-4 h-4 mr-2" />
-                      Hide Video
-                    </>
-                  ) : (
-                    <>
-                      <Video className="w-4 h-4 mr-2" />
-                      Show Video
-                    </>
-                  )}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
