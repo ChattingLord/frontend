@@ -30,6 +30,7 @@ export default function RoomPage() {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [isConnected, setIsConnected] = useState(false);
+  const [isJoined, setIsJoined] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const messageInputRef = useRef<HTMLInputElement>(null);
@@ -69,7 +70,7 @@ export default function RoomPage() {
     const reader = new FileReader();
     reader.onload = (e) => {
       const base64Data = e.target?.result as string;
-      
+
       // Extract base64 string (remove data:type;base64, prefix)
       const base64String = base64Data.split(',')[1] || base64Data;
 
@@ -148,16 +149,26 @@ export default function RoomPage() {
 
     const socket = getSocket();
 
+    // Check if valid connection exists
+    if (socket.connected) {
+      setIsConnected(true);
+      socket.emit("join-room", { roomId, userId: currentUserId });
+    }
+
     // Connection handlers
-    socket.on("connect", () => {
+    const onConnect = () => {
       setIsConnected(true);
       // Join the room
       socket.emit("join-room", { roomId, userId: currentUserId });
-    });
+    };
 
-    socket.on("disconnect", () => {
+    const onDisconnect = () => {
       setIsConnected(false);
-    });
+      setIsJoined(false);
+    };
+
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
 
     // Room joined confirmation
     socket.on(
@@ -168,6 +179,7 @@ export default function RoomPage() {
         userCount: number;
         users: string[];
       }) => {
+        setIsJoined(true);
         // Update participants list - everyone starts with video and audio OFF
         const participantList: Participant[] = data.users.map((uid) => ({
           id: uid,
@@ -242,14 +254,14 @@ export default function RoomPage() {
           const participantMap = new Map(
             prevParticipants.map((p) => [p.id, p])
           );
-          
+
           return data.users.map((uid) => {
             const existing = participantMap.get(uid);
             return {
-          id: uid,
-          name: uid.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
-          color: getUserColor(uid),
-          isOnline: true,
+              id: uid,
+              name: uid.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
+              color: getUserColor(uid),
+              isOnline: true,
               isVideoOn: existing?.isVideoOn ?? false,
               isAudioOn: existing?.isAudioOn ?? false,
             };
@@ -289,7 +301,7 @@ export default function RoomPage() {
         timestamp: string;
       }) => {
         if (data.roomId !== roomId) return;
-        
+
         // Debug: Log file data if present
         if (data.fileData) {
           console.log("Received file message:", {
@@ -299,7 +311,7 @@ export default function RoomPage() {
             dataLength: data.fileData.data?.length || 0,
           });
         }
-        
+
         const senderName = data.userId
           .replace(/-/g, " ")
           .replace(/\b\w/g, (l) => l.toUpperCase());
@@ -358,8 +370,8 @@ export default function RoomPage() {
     // Cleanup on unmount
     return () => {
       socket.emit("leave-room", { roomId, userId: currentUserId });
-      socket.off("connect");
-      socket.off("disconnect");
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
       socket.off("room-joined");
       socket.off("user-joined");
       socket.off("user-left");
@@ -547,10 +559,11 @@ export default function RoomPage() {
               <ChevronRight className="w-5 h-5" />
             </Button>
           </div>
-          <ParticipantsSidebar 
+          <ParticipantsSidebar
             participants={participants}
             roomId={roomId}
             userId={userId}
+            isJoined={isJoined}
             onMediaStateChange={(videoOn, audioOn) => {
               setParticipants((prev) =>
                 prev.map((p) =>
@@ -567,10 +580,11 @@ export default function RoomPage() {
         <div className="p-4 border-b">
           <h2 className="font-semibold">Participants ({participants.length})</h2>
         </div>
-        <ParticipantsSidebar 
+        <ParticipantsSidebar
           participants={participants}
           roomId={roomId}
           userId={userId}
+          isJoined={isJoined}
           onMediaStateChange={(videoOn, audioOn) => {
             setParticipants((prev) =>
               prev.map((p) =>

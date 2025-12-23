@@ -39,6 +39,7 @@ interface ParticipantsSidebarProps {
   participants: Participant[]
   roomId: string
   userId: string
+  isJoined?: boolean
   onMediaStateChange?: (videoOn: boolean, audioOn: boolean) => void
 }
 
@@ -61,6 +62,7 @@ export function ParticipantsSidebar({
   participants,
   roomId,
   userId,
+  isJoined = true, // Default to true for backward compatibility if needed, but Page passes it now
   onMediaStateChange
 }: ParticipantsSidebarProps) {
   const localVideoRef = useRef<HTMLVideoElement>(null)
@@ -71,6 +73,7 @@ export function ParticipantsSidebar({
   const [isInitializing, setIsInitializing] = useState(true)
 
   const remotePeersRef = useRef<Map<string, RemotePeer>>(new Map())
+  const mediaStatesRef = useRef<Map<string, { isVideoOn: boolean; isAudioOn: boolean }>>(new Map())
   const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map())
   const localStreamRef = useRef<MediaStream | null>(null)
 
@@ -188,12 +191,15 @@ export function ParticipantsSidebar({
         if (!peer) {
           console.log(`[WebRTC] Creating new peer connection for ${remoteUserId}`)
           const pc = createPeerConnection(remoteUserId)
+          const savedState = mediaStatesRef.current.get(remoteUserId)
+          const participant = participants.find(p => p.id === remoteUserId)
+
           peer = {
             userId: remoteUserId,
             stream: null,
             peerConnection: pc,
-            isVideoOn: false,
-            isAudioOn: false,
+            isVideoOn: savedState?.isVideoOn ?? participant?.isVideoOn ?? false,
+            isAudioOn: savedState?.isAudioOn ?? participant?.isAudioOn ?? false,
           }
           remotePeersRef.current.set(remoteUserId, peer)
           setRemotePeers(new Map(remotePeersRef.current))
@@ -230,12 +236,15 @@ export function ParticipantsSidebar({
         if (!peer) {
           console.log(`[WebRTC] Creating new peer connection for ${data.fromUserId}`)
           const pc = createPeerConnection(data.fromUserId)
+          const savedState = mediaStatesRef.current.get(data.fromUserId)
+          const participant = participants.find(p => p.id === data.fromUserId)
+
           peer = {
             userId: data.fromUserId,
             stream: null,
             peerConnection: pc,
-            isVideoOn: false,
-            isAudioOn: false,
+            isVideoOn: savedState?.isVideoOn ?? participant?.isVideoOn ?? false,
+            isAudioOn: savedState?.isAudioOn ?? participant?.isAudioOn ?? false,
           }
           remotePeersRef.current.set(data.fromUserId, peer)
           setRemotePeers(new Map(remotePeersRef.current))
@@ -336,6 +345,12 @@ export function ParticipantsSidebar({
     const handleMediaStateChanged = (data: MediaStatePayload) => {
       if (data.userId === userId) return
 
+      // Store state even if peer doesn't exist yet
+      mediaStatesRef.current.set(data.userId, {
+        isVideoOn: data.isVideoOn,
+        isAudioOn: data.isAudioOn
+      })
+
       setRemotePeers((prev) => {
         const updated = new Map(prev)
         const peer = updated.get(data.userId)
@@ -413,19 +428,9 @@ export function ParticipantsSidebar({
     const initCall = async () => {
       try {
         console.log(`[WebRTC] Auto-starting call for ${userId}`)
-        // Low resolution for sidebar
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 320 }, height: { ideal: 240 } },
-          audio: true,
-        })
-
-        localStreamRef.current = stream
-        setLocalStream(stream)
-
-        // Default OFF
-        stream.getVideoTracks().forEach(track => track.enabled = false)
-        stream.getAudioTracks().forEach(track => track.enabled = false)
-
+        // Start with no media
+        localStreamRef.current = null
+        setLocalStream(null)
         setIsVideoEnabled(false)
         setIsAudioEnabled(false)
         setIsInitializing(false)
@@ -445,7 +450,9 @@ export function ParticipantsSidebar({
       }
     }
 
-    initCall()
+    if (isJoined) {
+      initCall()
+    }
 
     return () => {
       // Cleanup local
@@ -455,10 +462,48 @@ export function ParticipantsSidebar({
       const socket = getSocket()
       socket.emit("leave-call", { roomId, userId })
     }
-  }, [roomId, userId])
+  }, [roomId, userId, isJoined])
 
-  const toggleVideo = () => {
-    if (!localStream) return
+  const startLocalStream = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 320 }, height: { ideal: 240 } },
+        audio: true,
+      })
+
+      localStreamRef.current = stream
+      setLocalStream(stream)
+
+      // Add tracks to existing peers and renegotiate
+      remotePeersRef.current.forEach((peer, remoteUserId) => {
+        stream.getTracks().forEach((track) => {
+          peer.peerConnection.addTrack(track, stream)
+        })
+        createOfferToPeer(remoteUserId)
+      })
+
+      return stream
+    } catch (error) {
+      console.error("Error starting stream:", error)
+      return null
+    }
+  }
+
+  const toggleVideo = async () => {
+    if (!localStream) {
+      const stream = await startLocalStream()
+      if (stream) {
+        // Video is enabled by default in new stream
+        // Sync audio with current state (should be false)
+        stream.getAudioTracks().forEach((track) => {
+          track.enabled = isAudioEnabled
+        })
+        setIsVideoEnabled(true)
+        broadcastMediaState(true, isAudioEnabled)
+      }
+      return
+    }
+
     const newState = !isVideoEnabled
     localStream.getVideoTracks().forEach((track) => {
       track.enabled = newState
@@ -467,8 +512,21 @@ export function ParticipantsSidebar({
     broadcastMediaState(newState, isAudioEnabled)
   }
 
-  const toggleAudio = () => {
-    if (!localStream) return
+  const toggleAudio = async () => {
+    if (!localStream) {
+      const stream = await startLocalStream()
+      if (stream) {
+        // Audio is enabled by default in new stream
+        // Sync video with current state (should be false)
+        stream.getVideoTracks().forEach((track) => {
+          track.enabled = isVideoEnabled
+        })
+        setIsAudioEnabled(true)
+        broadcastMediaState(isVideoEnabled, true)
+      }
+      return
+    }
+
     const newState = !isAudioEnabled
     localStream.getAudioTracks().forEach((track) => {
       track.enabled = newState
@@ -610,8 +668,8 @@ export function ParticipantsSidebar({
             size="sm"
             variant="outline"
             className={`h-8 w-8 p-0 ${isVideoEnabled
-                ? "bg-gray-700 hover:bg-gray-600 text-white border-gray-600"
-                : "bg-red-600 hover:bg-red-700 text-white border-red-600"
+              ? "bg-gray-700 hover:bg-gray-600 text-white border-gray-600"
+              : "bg-red-600 hover:bg-red-700 text-white border-red-600"
               }`}
           >
             {isVideoEnabled ? (
@@ -625,8 +683,8 @@ export function ParticipantsSidebar({
             size="sm"
             variant="outline"
             className={`h-8 w-8 p-0 ${isAudioEnabled
-                ? "bg-gray-700 hover:bg-gray-600 text-white border-gray-600"
-                : "bg-red-600 hover:bg-red-700 text-white border-red-600"
+              ? "bg-gray-700 hover:bg-gray-600 text-white border-gray-600"
+              : "bg-red-600 hover:bg-red-700 text-white border-red-600"
               }`}
           >
             {isAudioEnabled ? (
