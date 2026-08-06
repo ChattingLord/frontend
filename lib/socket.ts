@@ -9,8 +9,11 @@ export const getSocket = (): Socket => {
     socket = io(API_URL, {
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
+      reconnectionAttempts: Infinity, // Retry indefinitely
+      reconnectionDelay: 1000, // Start with 1s delay
+      reconnectionDelayMax: 5000, // Grow up to 5s
+      randomizationFactor: 0.5,
+      timeout: 20000,
     })
   }
   return socket
