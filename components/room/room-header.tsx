@@ -19,9 +19,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Users, MoreVertical, Copy, Share2, LogOut, Menu } from "lucide-react"
+import { Users, MoreVertical, Copy, Share2, LogOut, Menu, Shield } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { getSocket, disconnectSocket } from "@/lib/socket"
+import { clearRoomSession } from "@/lib/room-session"
 
 interface RoomHeaderProps {
   roomId: string
@@ -51,18 +52,27 @@ export function RoomHeader({ roomId, participantCount, onToggleSidebar, isConnec
     const shareUrl = `${window.location.origin}/?roomId=${encodeURIComponent(roomId)}`
     const shareData = {
       title: "Join my ChattingLord room",
-      text: `Join my ephemeral chat room: ${roomId}`,
+      text: "Join my ephemeral chat room on ChattingLord",
       url: shareUrl,
     }
 
     if (navigator.share) {
       try {
         await navigator.share(shareData)
-      } catch (err) {
-        copyRoomId()
+      } catch {
+        // Fall through to copy invite link
+        await navigator.clipboard.writeText(shareUrl)
+        toast({
+          title: "Invite link copied",
+          description: "Share it privately — the room code is only in the link.",
+        })
       }
     } else {
-      copyRoomId()
+      await navigator.clipboard.writeText(shareUrl)
+      toast({
+        title: "Invite link copied",
+        description: "Share it privately — the room code is only in the link.",
+      })
     }
   }
 
@@ -76,6 +86,7 @@ export function RoomHeader({ roomId, participantCount, onToggleSidebar, isConnec
       disconnectSocket()
     }
     sessionStorage.removeItem("userName")
+    clearRoomSession()
     router.push("/")
   }
 
@@ -89,7 +100,10 @@ export function RoomHeader({ roomId, participantCount, onToggleSidebar, isConnec
             </Button>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="font-semibold text-lg">Room {roomId}</h1>
+                <h1 className="font-semibold text-lg flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-muted-foreground" />
+                  Private room
+                </h1>
                 <div className="flex items-center gap-1">
                   <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`} />
                   <span className="text-xs text-muted-foreground">{isConnected ? 'Connected' : 'Connecting...'}</span>
@@ -114,7 +128,7 @@ export function RoomHeader({ roomId, participantCount, onToggleSidebar, isConnec
               <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuItem onClick={copyRoomId}>
                   <Copy className="w-4 h-4 mr-2" />
-                  Copy Room ID
+                  {copied ? "Copied!" : "Copy Room ID"}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={shareRoom}>
                   <Share2 className="w-4 h-4 mr-2" />

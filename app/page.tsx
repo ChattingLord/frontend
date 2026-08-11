@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Shield, Trash2, Lock, Sparkles, Copy, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { createRoomSession } from "@/lib/room-session";
 
 function HomePageContent() {
   const [name, setName] = useState("");
@@ -18,13 +19,14 @@ function HomePageContent() {
   const searchParams = useSearchParams();
   const { toast } = useToast();
 
-  // Prefill room ID when coming from a shared link like /?roomId=SECRET
+  // Prefill room ID from a shared invite, then strip it from the address bar
   useEffect(() => {
     const sharedRoomId = searchParams.get("roomId");
     if (sharedRoomId) {
       setRoomId(sharedRoomId.toUpperCase());
+      router.replace("/", { scroll: false });
     }
-  }, [searchParams]);
+  }, [searchParams, router]);
 
   const generateRoomId = () => {
     const id = Math.random().toString(36).substring(2, 10).toUpperCase();
@@ -52,7 +54,9 @@ function HomePageContent() {
 
     // Store user data in sessionStorage
     sessionStorage.setItem("userName", name);
-    router.push(`/room/${roomId}`);
+    // Opaque URL slug — real room code stays out of the address bar
+    const session = createRoomSession(roomId);
+    router.push(`/room/${session.slug}`);
   };
 
   const copyRoomId = async () => {

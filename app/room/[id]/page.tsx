@@ -14,6 +14,7 @@ import type { Message, MessageReplyTo, Participant } from "@/types/chat";
 import { getSocket, disconnectSocket } from "@/lib/socket";
 import { getUserColor } from "@/lib/user-colors";
 import { useToast } from "@/hooks/use-toast";
+import { clearRoomSession, getRoomSession } from "@/lib/room-session";
 // Emoji picker
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
@@ -21,8 +22,9 @@ import Picker from "@emoji-mart/react";
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
-  const roomId = params.id as string;
+  const roomSlug = params.id as string;
   const { toast } = useToast();
+  const [roomId, setRoomId] = useState("");
   const [userName, setUserName] = useState("");
   const [userId, setUserId] = useState("");
   const [message, setMessage] = useState("");
@@ -142,6 +144,14 @@ export default function RoomPage() {
   }, [showEmojiPicker, replyingTo]);
 
   useEffect(() => {
+    // Resolve opaque URL slug → real room code (kept out of the address bar)
+    const session = getRoomSession(roomSlug);
+    if (!session) {
+      router.replace("/");
+      return;
+    }
+    setRoomId(session.roomId);
+
     // Get user name from sessionStorage
     const name = sessionStorage.getItem("userName");
     if (!name) {
@@ -154,18 +164,19 @@ export default function RoomPage() {
     setUserId(currentUserId);
 
     const socket = getSocket();
+    const activeRoomId = session.roomId;
 
     // Check if valid connection exists
     if (socket.connected) {
       setIsConnected(true);
-      socket.emit("join-room", { roomId, userId: currentUserId });
+      socket.emit("join-room", { roomId: activeRoomId, userId: currentUserId });
     }
 
     // Connection handlers
     const onConnect = () => {
       setIsConnected(true);
       // Join the room
-      socket.emit("join-room", { roomId, userId: currentUserId });
+      socket.emit("join-room", { roomId: activeRoomId, userId: currentUserId });
     };
 
     const onDisconnect = () => {
@@ -308,7 +319,7 @@ export default function RoomPage() {
         replyTo?: MessageReplyTo;
         timestamp: string;
       }) => {
-        if (data.roomId !== roomId) return;
+        if (data.roomId !== activeRoomId) return;
 
         // Debug: Log file data if present
         if (data.fileData) {
@@ -378,7 +389,7 @@ export default function RoomPage() {
 
     // Cleanup on unmount
     return () => {
-      socket.emit("leave-room", { roomId, userId: currentUserId });
+      socket.emit("leave-room", { roomId: activeRoomId, userId: currentUserId });
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("room-joined");
@@ -390,7 +401,7 @@ export default function RoomPage() {
       socket.off("error");
       disconnectSocket();
     };
-  }, [router, roomId]);
+  }, [router, roomSlug]);
 
   const handleReply = (target: Message) => {
     setReplyingTo({
@@ -459,6 +470,14 @@ export default function RoomPage() {
       uid.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
     )
     .join(", ");
+
+  if (!roomId) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+        Opening private room…
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
