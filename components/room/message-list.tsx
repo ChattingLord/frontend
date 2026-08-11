@@ -1,12 +1,12 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { Message } from "@/types/chat"
 import { formatDistanceToNow } from "date-fns"
-import { Download, File } from "lucide-react"
+import { Download, File, Reply } from "lucide-react"
 
 // Helper function to format file size
 const formatFileSize = (bytes: number): string => {
@@ -78,15 +78,50 @@ interface MessageListProps {
   currentUserId: string
   isTyping?: boolean
   typingUserName?: string
+  onReply?: (message: Message) => void
 }
 
-export function MessageList({ messages, currentUserId, isTyping, typingUserName }: MessageListProps) {
+export function MessageList({
+  messages,
+  currentUserId,
+  isTyping,
+  typingUserName,
+  onReply,
+}: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [highlightedId, setHighlightedId] = useState<string | null>(null)
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, isTyping])
 
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  const scrollToMessage = (messageId: string) => {
+    const exists = messages.some((m) => m.id === messageId)
+    if (!exists) return
+
+    const el = document.getElementById(`message-${messageId}`)
+    if (!el) return
+
+    el.scrollIntoView({ behavior: "smooth", block: "center" })
+
+    if (highlightTimeoutRef.current) {
+      clearTimeout(highlightTimeoutRef.current)
+    }
+    setHighlightedId(messageId)
+    highlightTimeoutRef.current = setTimeout(() => {
+      setHighlightedId(null)
+      highlightTimeoutRef.current = null
+    }, 1400)
+  }
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4">
       {messages.map((message) => {
@@ -109,7 +144,12 @@ export function MessageList({ messages, currentUserId, isTyping, typingUserName 
         return (
           <div
             key={message.id}
-            className={cn("flex gap-3 animate-slide-up", isSentByCurrentUser && "flex-row-reverse")}
+            id={`message-${message.id}`}
+            className={cn(
+              "group flex gap-3 animate-slide-up",
+              isSentByCurrentUser && "flex-row-reverse",
+              highlightedId === message.id && "message-highlight",
+            )}
           >
             {!isSentByCurrentUser && (
               <Avatar className="w-8 h-8 shrink-0">
@@ -125,12 +165,49 @@ export function MessageList({ messages, currentUserId, isTyping, typingUserName 
               )}
               <div
                 className={cn(
-                  "rounded-2xl px-4 py-2.5",
+                  "relative rounded-2xl px-4 py-2.5",
                   isSentByCurrentUser
                     ? "bg-primary text-primary-foreground rounded-tr-sm"
                     : "bg-muted text-foreground rounded-tl-sm",
                 )}
               >
+                {message.replyTo && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      scrollToMessage(message.replyTo!.id)
+                    }}
+                    className={cn(
+                      "mb-2 w-full text-left rounded-lg border-l-2 px-2.5 py-1.5 text-xs cursor-pointer transition-opacity hover:opacity-90",
+                      isSentByCurrentUser
+                        ? "border-primary-foreground/50 bg-primary-foreground/10"
+                        : "border-primary/60 bg-background/60",
+                    )}
+                    aria-label={`Jump to reply from ${message.replyTo.senderName || "message"}`}
+                  >
+                    <p
+                      className={cn(
+                        "font-medium truncate",
+                        isSentByCurrentUser
+                          ? "text-primary-foreground/90"
+                          : "text-primary",
+                      )}
+                    >
+                      {message.replyTo.senderName || "Unknown"}
+                    </p>
+                    <p
+                      className={cn(
+                        "truncate opacity-80",
+                        isSentByCurrentUser
+                          ? "text-primary-foreground"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {message.replyTo.content}
+                    </p>
+                  </button>
+                )}
                 {message.fileData && message.fileData.data ? (
                   <div className="space-y-2">
                     {message.fileData.fileType && message.fileData.fileType.startsWith("image/") ? (
@@ -197,9 +274,29 @@ export function MessageList({ messages, currentUserId, isTyping, typingUserName 
                   <p className="text-sm leading-relaxed break-words">{message.content}</p>
                 )}
               </div>
-              <span className="text-xs text-muted-foreground px-1">
-                {formatDistanceToNow(message.timestamp, { addSuffix: true })}
-              </span>
+              <div
+                className={cn(
+                  "flex items-center gap-1 px-1",
+                  isSentByCurrentUser && "flex-row-reverse",
+                )}
+              >
+                <span className="text-xs text-muted-foreground">
+                  {formatDistanceToNow(message.timestamp, { addSuffix: true })}
+                </span>
+                {onReply && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-1.5 text-xs text-muted-foreground opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                    onClick={() => onReply(message)}
+                    aria-label="Reply to message"
+                  >
+                    <Reply className="w-3.5 h-3.5 mr-1" />
+                    Reply
+                  </Button>
+                )}
+              </div>
             </div>
 
             {isSentByCurrentUser && (

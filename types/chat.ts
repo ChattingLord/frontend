@@ -1,3 +1,10 @@
+export interface MessageReplyTo {
+  id: string
+  content: string
+  senderId?: string
+  senderName?: string
+}
+
 export interface Message {
   id: string
   type: "user" | "system"
@@ -13,6 +20,7 @@ export interface Message {
     fileSize: number
     data: string // base64 encoded file data
   }
+  replyTo?: MessageReplyTo
 }
 
 export interface Participant {

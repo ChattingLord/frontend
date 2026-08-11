@@ -9,8 +9,8 @@ import { Input } from "@/components/ui/input";
 import { RoomHeader } from "@/components/room/room-header";
 import { MessageList } from "@/components/room/message-list";
 import { ParticipantsSidebar } from "@/components/room/participants-sidebar";
-import { Send, Paperclip, Smile, ChevronRight } from "lucide-react";
-import type { Message, Participant } from "@/types/chat";
+import { Send, Paperclip, Smile, ChevronRight, X } from "lucide-react";
+import type { Message, MessageReplyTo, Participant } from "@/types/chat";
 import { getSocket, disconnectSocket } from "@/lib/socket";
 import { getUserColor } from "@/lib/user-colors";
 import { useToast } from "@/hooks/use-toast";
@@ -33,6 +33,7 @@ export default function RoomPage() {
   const [isJoined, setIsJoined] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<MessageReplyTo | null>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -91,7 +92,9 @@ export default function RoomPage() {
           message: file.name, // Use filename as message text
           type: "file",
           fileData,
+          replyTo: replyingTo || undefined,
         });
+        setReplyingTo(null);
       }
     };
 
@@ -107,12 +110,11 @@ export default function RoomPage() {
     event.target.value = "";
   };
 
-  // Close emoji picker on outside click or Escape
+  // Close emoji picker on outside click or Escape; Escape also cancels reply
   useEffect(() => {
-    if (!showEmojiPicker) return;
-
     const handleClickOutside = (event: MouseEvent) => {
       if (
+        showEmojiPicker &&
         emojiPickerRef.current &&
         !emojiPickerRef.current.contains(event.target as Node)
       ) {
@@ -122,7 +124,11 @@ export default function RoomPage() {
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setShowEmojiPicker(false);
+        if (showEmojiPicker) {
+          setShowEmojiPicker(false);
+        } else if (replyingTo) {
+          setReplyingTo(null);
+        }
       }
     };
 
@@ -133,7 +139,7 @@ export default function RoomPage() {
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [showEmojiPicker]);
+  }, [showEmojiPicker, replyingTo]);
 
   useEffect(() => {
     // Get user name from sessionStorage
@@ -288,6 +294,7 @@ export default function RoomPage() {
     socket.on(
       "new-message",
       (data: {
+        id?: string;
         roomId: string;
         userId: string;
         message: string;
@@ -298,6 +305,7 @@ export default function RoomPage() {
           fileSize: number;
           data: string;
         };
+        replyTo?: MessageReplyTo;
         timestamp: string;
       }) => {
         if (data.roomId !== roomId) return;
@@ -316,7 +324,7 @@ export default function RoomPage() {
           .replace(/-/g, " ")
           .replace(/\b\w/g, (l) => l.toUpperCase());
         const newMessage: Message = {
-          id: `msg-${Date.now()}-${Math.random()}`,
+          id: data.id || `msg-${Date.now()}-${Math.random()}`,
           type: "user",
           content: data.message,
           senderId: data.userId,
@@ -325,6 +333,7 @@ export default function RoomPage() {
           timestamp: new Date(data.timestamp),
           isSent: data.userId === currentUserId,
           fileData: data.fileData,
+          replyTo: data.replyTo,
         };
         setMessages((prev) => [...prev, newMessage]);
       }
@@ -383,6 +392,16 @@ export default function RoomPage() {
     };
   }, [router, roomId]);
 
+  const handleReply = (target: Message) => {
+    setReplyingTo({
+      id: target.id,
+      content: target.content,
+      senderId: target.senderId,
+      senderName: target.senderName,
+    });
+    messageInputRef.current?.focus();
+  };
+
   const sendMessage = () => {
     if (!message.trim() || !isConnected) return;
 
@@ -392,9 +411,11 @@ export default function RoomPage() {
       userId,
       message: message.trim(),
       type: "text",
+      replyTo: replyingTo || undefined,
     });
 
     setMessage("");
+    setReplyingTo(null);
     // Clear typing indicator
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
@@ -458,10 +479,33 @@ export default function RoomPage() {
               currentUserId={userId}
               isTyping={typingUsers.size > 0}
               typingUserName={typingUserNames}
+              onReply={handleReply}
             />
 
             {/* Message input */}
             <div className="border-t bg-card/50 backdrop-blur-sm p-4">
+              {replyingTo && (
+                <div className="mb-3 flex items-start gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2">
+                  <div className="min-w-0 flex-1 border-l-2 border-primary pl-2.5">
+                    <p className="text-xs font-medium text-primary truncate">
+                      Replying to {replyingTo.senderName || "message"}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {replyingTo.content}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0"
+                    onClick={() => setReplyingTo(null)}
+                    aria-label="Cancel reply"
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              )}
               <div className="flex items-end gap-2">
                 <div className="flex-1 relative">
                   <Input

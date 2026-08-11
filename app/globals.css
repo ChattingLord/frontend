@@ -154,3 +154,18 @@
 .animate-pulse-dot {
   animation: pulse-dot 1.4s ease-in-out infinite;
 }
+
+@keyframes message-highlight {
+  0% {
+    background-color: color-mix(in oklch, var(--primary) 28%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.message-highlight {
+  animation: message-highlight 1.4s ease-out;
+  border-radius: 0.75rem;
+}
+
