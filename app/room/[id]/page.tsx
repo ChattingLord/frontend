@@ -14,6 +14,7 @@ import type { Message, MessageReplyTo, Participant } from "@/types/chat";
 import { getSocket, disconnectSocket } from "@/lib/socket";
 import { getUserColor } from "@/lib/user-colors";
 import { useToast } from "@/hooks/use-toast";
+import { useUnreadTabAlert } from "@/hooks/use-unread-tab-alert";
 import { clearRoomSession, getRoomSession } from "@/lib/room-session";
 // Emoji picker
 import data from "@emoji-mart/data";
@@ -24,6 +25,9 @@ export default function RoomPage() {
   const router = useRouter();
   const roomSlug = params.id as string;
   const { toast } = useToast();
+  const { notifyUnread } = useUnreadTabAlert();
+  const notifyUnreadRef = useRef(notifyUnread);
+  notifyUnreadRef.current = notifyUnread;
   const [roomId, setRoomId] = useState("");
   const [userName, setUserName] = useState("");
   const [userId, setUserId] = useState("");
@@ -347,6 +351,10 @@ export default function RoomPage() {
           replyTo: data.replyTo,
         };
         setMessages((prev) => [...prev, newMessage]);
+
+        if (data.userId !== currentUserId && document.hidden) {
+          notifyUnreadRef.current();
+        }
       }
     );
 
