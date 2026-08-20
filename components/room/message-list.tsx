@@ -311,21 +311,29 @@ export function MessageList({
       })}
 
       {isTyping && (
-        <div className="flex gap-3 animate-slide-up">
-          <div className="flex items-center gap-1 bg-muted rounded-2xl px-4 py-3 rounded-tl-sm">
-            <div
-              className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-pulse-dot"
-              style={{ animationDelay: "0ms" }}
-            />
-            <div
-              className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-pulse-dot"
-              style={{ animationDelay: "200ms" }}
-            />
-            <div
-              className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-pulse-dot"
-              style={{ animationDelay: "400ms" }}
-            />
+        <div className="flex flex-col gap-1 animate-slide-up">
+          <div className="flex gap-3">
+            <div className="flex items-center gap-1 bg-muted rounded-2xl px-4 py-3 rounded-tl-sm">
+              <div
+                className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-pulse-dot"
+                style={{ animationDelay: "0ms" }}
+              />
+              <div
+                className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-pulse-dot"
+                style={{ animationDelay: "200ms" }}
+              />
+              <div
+                className="w-2 h-2 rounded-full bg-muted-foreground/60 animate-pulse-dot"
+                style={{ animationDelay: "400ms" }}
+              />
+            </div>
           </div>
+          {typingUserName && (
+            <p className="text-xs text-muted-foreground px-1">
+              {typingUserName}{" "}
+              {typingUserName.includes(",") ? "are" : "is"} typing...
+            </p>
+          )}
         </div>
       )}
 

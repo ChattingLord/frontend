@@ -471,12 +471,14 @@ export default function RoomPage() {
     }
   };
 
-  // Get typing user names
-  const typingUserNames = Array.from(typingUsers)
-    .filter((uid) => uid !== userId)
-    .map((uid) =>
-      uid.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
-    )
+  // Get typing user names (exclude self)
+  const typingOthers = Array.from(typingUsers).filter((uid) => uid !== userId);
+  const typingUserNames = typingOthers
+    .map((uid) => {
+      const participant = participants.find((p) => p.id === uid);
+      if (participant?.name) return participant.name;
+      return uid.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+    })
     .join(", ");
 
   if (!roomId) {
@@ -504,7 +506,7 @@ export default function RoomPage() {
             <MessageList
               messages={messages}
               currentUserId={userId}
-              isTyping={typingUsers.size > 0}
+              isTyping={typingOthers.length > 0}
               typingUserName={typingUserNames}
               onReply={handleReply}
             />
