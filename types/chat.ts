@@ -21,6 +21,7 @@ export interface Message {
     data: string // base64 encoded file data
   }
   replyTo?: MessageReplyTo
+  deleted?: boolean
 }
 
 export interface Participant {

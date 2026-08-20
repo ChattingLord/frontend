@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { Message } from "@/types/chat"
 import { formatDistanceToNow } from "date-fns"
-import { Download, File, Reply } from "lucide-react"
+import { Download, File, Reply, Trash2 } from "lucide-react"
 
 // Helper function to format file size
 const formatFileSize = (bytes: number): string => {
@@ -79,6 +79,7 @@ interface MessageListProps {
   isTyping?: boolean
   typingUserName?: string
   onReply?: (message: Message) => void
+  onDelete?: (message: Message) => void
 }
 
 export function MessageList({
@@ -87,6 +88,7 @@ export function MessageList({
   isTyping,
   typingUserName,
   onReply,
+  onDelete,
 }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
@@ -163,6 +165,18 @@ export function MessageList({
               {!isSentByCurrentUser && (
                 <span className="text-xs font-medium text-muted-foreground px-1">{message.senderName}</span>
               )}
+              {message.deleted ? (
+                <div
+                  className={cn(
+                    "rounded-2xl px-4 py-2.5 italic text-sm text-muted-foreground",
+                    isSentByCurrentUser
+                      ? "bg-muted/60 rounded-tr-sm"
+                      : "bg-muted/60 rounded-tl-sm",
+                  )}
+                >
+                  This message was deleted
+                </div>
+              ) : (
               <div
                 className={cn(
                   "relative rounded-2xl px-4 py-2.5",
@@ -204,7 +218,9 @@ export function MessageList({
                           : "text-muted-foreground",
                       )}
                     >
-                      {message.replyTo.content}
+                      {messages.find((m) => m.id === message.replyTo?.id)?.deleted
+                        ? "Original message deleted"
+                        : message.replyTo.content}
                     </p>
                   </button>
                 )}
@@ -274,6 +290,7 @@ export function MessageList({
                   <p className="text-sm leading-relaxed break-words">{message.content}</p>
                 )}
               </div>
+              )}
               <div
                 className={cn(
                   "flex items-center gap-1 px-1",
@@ -283,7 +300,7 @@ export function MessageList({
                 <span className="text-xs text-muted-foreground">
                   {formatDistanceToNow(message.timestamp, { addSuffix: true })}
                 </span>
-                {onReply && (
+                {!message.deleted && onReply && (
                   <Button
                     type="button"
                     variant="ghost"
@@ -294,6 +311,19 @@ export function MessageList({
                   >
                     <Reply className="w-3.5 h-3.5 mr-1" />
                     Reply
+                  </Button>
+                )}
+                {!message.deleted && isSentByCurrentUser && onDelete && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-1.5 text-xs text-destructive opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                    onClick={() => onDelete(message)}
+                    aria-label="Delete message"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 mr-1" />
+                    Delete
                   </Button>
                 )}
               </div>

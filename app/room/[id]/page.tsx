@@ -358,6 +358,23 @@ export default function RoomPage() {
       }
     );
 
+    socket.on(
+      "message-deleted",
+      (data: { roomId: string; messageId: string; userId: string }) => {
+        if (data.roomId !== activeRoomId) return;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === data.messageId
+              ? { ...m, deleted: true, content: "", fileData: undefined }
+              : m
+          )
+        );
+        setReplyingTo((current) =>
+          current?.id === data.messageId ? null : current
+        );
+      }
+    );
+
     // Typing indicator
     socket.on("user-typing", (data: { userId: string; isTyping: boolean }) => {
       setTypingUsers((prev) => {
@@ -404,6 +421,7 @@ export default function RoomPage() {
       socket.off("user-joined");
       socket.off("user-left");
       socket.off("new-message");
+      socket.off("message-deleted");
       socket.off("user-typing");
       socket.off("user-media-state-changed");
       socket.off("error");
@@ -412,6 +430,7 @@ export default function RoomPage() {
   }, [router, roomSlug]);
 
   const handleReply = (target: Message) => {
+    if (target.deleted) return;
     setReplyingTo({
       id: target.id,
       content: target.content,
@@ -419,6 +438,17 @@ export default function RoomPage() {
       senderName: target.senderName,
     });
     messageInputRef.current?.focus();
+  };
+
+  const handleDelete = (target: Message) => {
+    if (target.deleted || target.senderId !== userId || !isConnected) return;
+    if (!window.confirm("Delete this message for everyone in the room?")) return;
+    const socket = getSocket();
+    socket.emit("delete-message", {
+      roomId,
+      userId,
+      messageId: target.id,
+    });
   };
 
   const sendMessage = () => {
@@ -509,6 +539,7 @@ export default function RoomPage() {
               isTyping={typingOthers.length > 0}
               typingUserName={typingUserNames}
               onReply={handleReply}
+              onDelete={handleDelete}
             />
 
             {/* Message input */}
