@@ -5,7 +5,6 @@ import type React from "react";
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { RoomHeader } from "@/components/room/room-header";
 import { MessageList } from "@/components/room/message-list";
 import { ParticipantsSidebar } from "@/components/room/participants-sidebar";
@@ -40,7 +39,7 @@ export default function RoomPage() {
   const [showSidebar, setShowSidebar] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageReplyTo | null>(null);
-  const messageInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const emojiPickerRef = useRef<HTMLDivElement | null>(null);
@@ -465,6 +464,9 @@ export default function RoomPage() {
 
     setMessage("");
     setReplyingTo(null);
+    if (messageInputRef.current) {
+      messageInputRef.current.style.height = "auto";
+    }
     // Clear typing indicator
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
@@ -472,8 +474,13 @@ export default function RoomPage() {
     socket.emit("typing-stop", { roomId, userId });
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setMessage(e.target.value);
+
+    // Auto-grow textarea up to a few lines
+    const el = e.target;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
 
     const socket = getSocket();
     if (!socket.connected) return;
@@ -494,7 +501,8 @@ export default function RoomPage() {
     }, 1000);
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter sends; Shift+Enter inserts a newline
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -551,7 +559,7 @@ export default function RoomPage() {
                       Replying to {replyingTo.senderName || "message"}
                     </p>
                     <p className="text-xs text-muted-foreground truncate">
-                      {replyingTo.content}
+                      {replyingTo.content.replace(/\s+/g, " ")}
                     </p>
                   </div>
                   <Button
@@ -568,7 +576,7 @@ export default function RoomPage() {
               )}
               <div className="flex items-end gap-2">
                 <div className="flex-1 relative">
-                  <Input
+                  <textarea
                     ref={messageInputRef}
                     value={message}
                     onChange={handleInputChange}
@@ -576,7 +584,8 @@ export default function RoomPage() {
                     placeholder={
                       isConnected ? "Type a message..." : "Connecting..."
                     }
-                    className="pr-20 min-h-[44px] resize-none"
+                    rows={1}
+                    className="flex w-full min-h-11 max-h-40 rounded-md border border-input bg-transparent px-3 py-2.5 pr-20 text-base shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm resize-none overflow-y-auto leading-relaxed"
                     autoComplete="off"
                     disabled={!isConnected}
                   />
@@ -598,7 +607,7 @@ export default function RoomPage() {
                       />
                     </div>
                   )}
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  <div className="absolute right-2 bottom-1.5 flex items-center gap-1">
                     <Button
                       type="button"
                       variant="ghost"

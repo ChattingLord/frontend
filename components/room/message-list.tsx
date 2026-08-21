@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { Message } from "@/types/chat"
 import { formatDistanceToNow } from "date-fns"
-import { Download, File, Reply, Trash2 } from "lucide-react"
+import { Download, File, Reply, Trash2, Copy } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
 
 // Helper function to format file size
 const formatFileSize = (bytes: number): string => {
@@ -82,6 +83,13 @@ interface MessageListProps {
   onDelete?: (message: Message) => void
 }
 
+function getCopyText(message: Message): string | null {
+  if (message.deleted) return null
+  if (message.content?.trim()) return message.content
+  if (message.fileData?.fileName) return message.fileData.fileName
+  return null
+}
+
 export function MessageList({
   messages,
   currentUserId,
@@ -93,6 +101,7 @@ export function MessageList({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { toast } = useToast()
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -123,6 +132,25 @@ export function MessageList({
       setHighlightedId(null)
       highlightTimeoutRef.current = null
     }, 1400)
+  }
+
+  const handleCopy = async (message: Message) => {
+    const text = getCopyText(message)
+    if (!text) return
+
+    try {
+      await navigator.clipboard.writeText(text)
+      toast({
+        title: "Copied",
+        description: "Message copied to clipboard.",
+      })
+    } catch {
+      toast({
+        title: "Copy failed",
+        description: "Could not copy to clipboard.",
+        variant: "destructive",
+      })
+    }
   }
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -220,7 +248,7 @@ export function MessageList({
                     >
                       {messages.find((m) => m.id === message.replyTo?.id)?.deleted
                         ? "Original message deleted"
-                        : message.replyTo.content}
+                        : message.replyTo.content.replace(/\s+/g, " ")}
                     </p>
                   </button>
                 )}
@@ -283,11 +311,11 @@ export function MessageList({
                       </div>
                     )}
                     {message.content && message.content !== message.fileData.fileName && (
-                      <p className="text-sm leading-relaxed break-words mt-2">{message.content}</p>
+                      <p className="text-sm leading-relaxed break-words whitespace-pre-wrap mt-2">{message.content}</p>
                     )}
                   </div>
                 ) : (
-                  <p className="text-sm leading-relaxed break-words">{message.content}</p>
+                  <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{message.content}</p>
                 )}
               </div>
               )}
@@ -311,6 +339,19 @@ export function MessageList({
                   >
                     <Reply className="w-3.5 h-3.5 mr-1" />
                     Reply
+                  </Button>
+                )}
+                {!message.deleted && getCopyText(message) && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-1.5 text-xs text-muted-foreground opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                    onClick={() => handleCopy(message)}
+                    aria-label="Copy message"
+                  >
+                    <Copy className="w-3.5 h-3.5 mr-1" />
+                    Copy
                   </Button>
                 )}
                 {!message.deleted && isSentByCurrentUser && onDelete && (
