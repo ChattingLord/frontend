@@ -23,6 +23,7 @@ import { Users, MoreVertical, Copy, Share2, LogOut, Menu, Shield } from "lucide-
 import { useToast } from "@/hooks/use-toast"
 import { getSocket, disconnectSocket } from "@/lib/socket"
 import { clearRoomSession } from "@/lib/room-session"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 interface RoomHeaderProps {
   roomId: string
@@ -119,6 +120,7 @@ export function RoomHeader({ roomId, participantCount, onToggleSidebar, isConnec
           </div>
 
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon">

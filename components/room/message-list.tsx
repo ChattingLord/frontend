@@ -177,7 +177,7 @@ export function MessageList({
             id={`message-${message.id}`}
             className={cn(
               "group flex gap-3 animate-slide-up",
-              isSentByCurrentUser && "flex-row-reverse",
+              isSentByCurrentUser && "justify-end",
               highlightedId === message.id && "message-highlight",
             )}
           >
@@ -189,7 +189,7 @@ export function MessageList({
               </Avatar>
             )}
 
-            <div className={cn("flex flex-col gap-1 max-w-[70%]", isSentByCurrentUser && "items-end")}>
+            <div className={cn("flex flex-col gap-1 max-w-[70%] min-w-0", isSentByCurrentUser && "items-end")}>
               {!isSentByCurrentUser && (
                 <span className="text-xs font-medium text-muted-foreground px-1">{message.senderName}</span>
               )}
