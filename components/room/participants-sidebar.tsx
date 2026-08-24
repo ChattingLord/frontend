@@ -164,7 +164,7 @@ export function ParticipantsSidebar({
       t.receiver.track?.kind || t.sender.track?.kind
 
     const bindTrack = (kind: "video" | "audio", track: MediaStreamTrack | null) => {
-      const transceiver = pc.getTransceivers().find((t) => !t.stopped && kindOf(t) === kind)
+      const transceiver = pc.getTransceivers().find((t) => t.currentDirection !== "stopped" && kindOf(t) === kind)
       if (!transceiver) return false
       if (track) {
         void transceiver.sender.replaceTrack(track)
@@ -520,7 +520,7 @@ export function ParticipantsSidebar({
           // the established m-line order from the first offer/answer.
           const transceiver = peer.peerConnection
             .getTransceivers()
-            .find((t) => !t.stopped && (t.receiver.track?.kind === track.kind || t.sender.track?.kind === track.kind))
+            .find((t) => t.currentDirection !== "stopped" && (t.receiver.track?.kind === track.kind || t.sender.track?.kind === track.kind))
           if (transceiver) {
             void transceiver.sender.replaceTrack(track)
             transceiver.direction = "sendrecv"
