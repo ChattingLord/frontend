@@ -189,14 +189,19 @@ export function MessageList({
               </Avatar>
             )}
 
-            <div className={cn("flex flex-col gap-1 max-w-[70%] min-w-0", isSentByCurrentUser && "items-end")}>
+            <div
+              className={cn(
+                "flex flex-col gap-1 max-w-[70%] min-w-0",
+                isSentByCurrentUser ? "items-end" : "items-start",
+              )}
+            >
               {!isSentByCurrentUser && (
                 <span className="text-xs font-medium text-muted-foreground px-1">{message.senderName}</span>
               )}
               {message.deleted ? (
                 <div
                   className={cn(
-                    "rounded-2xl px-4 py-2.5 italic text-sm text-muted-foreground",
+                    "w-fit max-w-full rounded-2xl px-4 py-2.5 italic text-sm text-muted-foreground",
                     isSentByCurrentUser
                       ? "bg-muted/60 rounded-tr-sm"
                       : "bg-muted/60 rounded-tl-sm",
@@ -207,7 +212,7 @@ export function MessageList({
               ) : (
               <div
                 className={cn(
-                  "relative rounded-2xl px-4 py-2.5",
+                  "relative w-fit max-w-full rounded-2xl px-4 py-2.5",
                   isSentByCurrentUser
                     ? "bg-primary text-primary-foreground rounded-tr-sm"
                     : "bg-muted text-foreground rounded-tl-sm",
@@ -221,7 +226,7 @@ export function MessageList({
                       scrollToMessage(message.replyTo!.id)
                     }}
                     className={cn(
-                      "mb-2 w-full text-left rounded-lg border-l-2 px-2.5 py-1.5 text-xs cursor-pointer transition-opacity hover:opacity-90",
+                      "mb-2 block max-w-full text-left rounded-lg border-l-2 px-2.5 py-1.5 text-xs cursor-pointer transition-opacity hover:opacity-90",
                       isSentByCurrentUser
                         ? "border-primary-foreground/50 bg-primary-foreground/10"
                         : "border-primary/60 bg-background/60",
