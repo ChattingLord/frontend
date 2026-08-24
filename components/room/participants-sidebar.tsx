@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { Mic, MicOff, Video, VideoOff, Phone, PhoneOff } from "lucide-react"
+import { Mic, MicOff, Video, VideoOff } from "lucide-react"
 import type { Participant } from "@/types/chat"
 import getSocket from "@/lib/socket"
 
@@ -62,8 +62,8 @@ export function ParticipantsSidebar({
   participants,
   roomId,
   userId,
-  isJoined = true, // Default to true for backward compatibility if needed, but Page passes it now
-  onMediaStateChange
+  isJoined = true,
+  onMediaStateChange,
 }: ParticipantsSidebarProps) {
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
@@ -76,15 +76,12 @@ export function ParticipantsSidebar({
   const mediaStatesRef = useRef<Map<string, { isVideoOn: boolean; isAudioOn: boolean }>>(new Map())
   const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map())
   const localStreamRef = useRef<MediaStream | null>(null)
-
-  // Ref for current media state to access in callbacks
   const mediaStateRef = useRef({ video: false, audio: false })
 
   useEffect(() => {
     mediaStateRef.current = { video: isVideoEnabled, audio: isAudioEnabled }
   }, [isVideoEnabled, isAudioEnabled])
 
-  // Broadcast media state changes
   const broadcastMediaState = useCallback(
     (videoOn: boolean, audioOn: boolean) => {
       const socket = getSocket()
@@ -99,16 +96,13 @@ export function ParticipantsSidebar({
     [roomId, userId, onMediaStateChange]
   )
 
-  // Create peer connection for a remote user
   const createPeerConnection = useCallback(
     (remoteUserId: string): RTCPeerConnection => {
-      console.log(`[WebRTC] createPeerConnection for ${remoteUserId}`)
       const socket = getSocket()
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          // console.log(`[WebRTC] Sending ICE candidate to ${remoteUserId}`)
           socket.emit("webrtc-ice-candidate", {
             roomId,
             fromUserId: userId,
@@ -119,18 +113,20 @@ export function ParticipantsSidebar({
       }
 
       pc.ontrack = (event) => {
-        console.log(`[WebRTC] ontrack event from ${remoteUserId}:`, event.track.kind)
-        const [stream] = event.streams
+        let [stream] = event.streams
         if (!stream) {
-          console.log(`[WebRTC] No stream in ontrack event`)
-          return
+          // Some browsers fire ontrack without event.streams populated.
+          // Build a stable MediaStream per remote peer from incoming tracks.
+          const existing = remotePeersRef.current.get(remoteUserId)?.stream
+          stream = existing ?? new MediaStream()
+          stream.addTrack(event.track)
         }
+        if (!stream) return
 
         setRemotePeers((prev) => {
           const updated = new Map(prev)
           const peer = updated.get(remoteUserId)
           if (peer) {
-            // Immutable update
             updated.set(remoteUserId, { ...peer, stream })
           }
           return updated
@@ -144,19 +140,18 @@ export function ParticipantsSidebar({
       }
 
       pc.onconnectionstatechange = () => {
-        console.log(`[WebRTC] Connection state for ${remoteUserId}: ${pc.connectionState}`)
         if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
           removePeer(remoteUserId)
         }
       }
 
       if (localStreamRef.current) {
-        console.log(`[WebRTC] Adding ${localStreamRef.current.getTracks().length} local tracks to peer connection`)
         localStreamRef.current.getTracks().forEach((track) => {
           pc.addTrack(track, localStreamRef.current!)
         })
       } else {
-        console.log(`[WebRTC] WARNING: No local stream when creating peer connection!`)
+        pc.addTransceiver("video", { direction: "recvonly" })
+        pc.addTransceiver("audio", { direction: "recvonly" })
       }
 
       return pc
@@ -185,14 +180,12 @@ export function ParticipantsSidebar({
     async (remoteUserId: string) => {
       const socket = getSocket()
       try {
-        console.log(`[WebRTC] createOfferToPeer called for ${remoteUserId}`)
         let peer = remotePeersRef.current.get(remoteUserId)
 
         if (!peer) {
-          console.log(`[WebRTC] Creating new peer connection for ${remoteUserId}`)
           const pc = createPeerConnection(remoteUserId)
           const savedState = mediaStatesRef.current.get(remoteUserId)
-          const participant = participants.find(p => p.id === remoteUserId)
+          const participant = participants.find((p) => p.id === remoteUserId)
 
           peer = {
             userId: remoteUserId,
@@ -205,11 +198,9 @@ export function ParticipantsSidebar({
           setRemotePeers(new Map(remotePeersRef.current))
         }
 
-        console.log(`[WebRTC] Creating offer for ${remoteUserId}`)
         const offer = await peer.peerConnection.createOffer()
         await peer.peerConnection.setLocalDescription(offer)
 
-        console.log(`[WebRTC] Sending offer to ${remoteUserId}`)
         socket.emit("webrtc-offer", {
           roomId,
           fromUserId: userId,
@@ -226,18 +217,26 @@ export function ParticipantsSidebar({
   useEffect(() => {
     const socket = getSocket()
 
+    const handleCallUsers = (data: { roomId: string; users: string[] }) => {
+      if (data.roomId !== roomId) return
+      // Joiner creates offers to everyone already in the call
+      data.users.forEach((existingUserId) => {
+        if (existingUserId && existingUserId !== userId) {
+          createOfferToPeer(existingUserId)
+        }
+      })
+    }
+
     const handleOffer = async (data: WebRTCOfferAnswerPayload) => {
-      console.log(`[WebRTC] Received offer from ${data.fromUserId}`)
       if (data.roomId !== roomId || data.toUserId !== userId) return
 
       try {
         let peer = remotePeersRef.current.get(data.fromUserId)
 
         if (!peer) {
-          console.log(`[WebRTC] Creating new peer connection for ${data.fromUserId}`)
           const pc = createPeerConnection(data.fromUserId)
           const savedState = mediaStatesRef.current.get(data.fromUserId)
-          const participant = participants.find(p => p.id === data.fromUserId)
+          const participant = participants.find((p) => p.id === data.fromUserId)
 
           peer = {
             userId: data.fromUserId,
@@ -264,7 +263,6 @@ export function ParticipantsSidebar({
         }
         pendingCandidatesRef.current.delete(data.fromUserId)
 
-        console.log(`[WebRTC] Sending answer to ${data.fromUserId}`)
         socket.emit("webrtc-answer", {
           roomId,
           fromUserId: userId,
@@ -272,32 +270,22 @@ export function ParticipantsSidebar({
           sdp: peer.peerConnection.localDescription,
         })
 
-        // Broadcast our state so the caller knows our status
+        // Broadcast our media state to the new caller
         const { video, audio } = mediaStateRef.current
-        socket.emit("media-state-change", {
-          roomId,
-          userId,
-          isVideoOn: video,
-          isAudioOn: audio,
-        })
-
+        socket.emit("media-state-change", { roomId, userId, isVideoOn: video, isAudioOn: audio })
       } catch (error) {
         console.error("[WebRTC] Error handling WebRTC offer:", error)
       }
     }
 
     const handleAnswer = async (data: WebRTCOfferAnswerPayload) => {
-      console.log(`[WebRTC] Received answer from ${data.fromUserId}`)
       if (data.roomId !== roomId || data.toUserId !== userId) return
 
       try {
         const peer = remotePeersRef.current.get(data.fromUserId)
         if (!peer) return
 
-        if (peer.peerConnection.signalingState !== "have-local-offer") {
-          // Can happen in glare situations or bad state
-          return
-        }
+        if (peer.peerConnection.signalingState !== "have-local-offer") return
 
         await peer.peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp))
 
@@ -345,22 +333,16 @@ export function ParticipantsSidebar({
     const handleMediaStateChanged = (data: MediaStatePayload) => {
       if (data.userId === userId) return
 
-      // Store state even if peer doesn't exist yet
       mediaStatesRef.current.set(data.userId, {
         isVideoOn: data.isVideoOn,
-        isAudioOn: data.isAudioOn
+        isAudioOn: data.isAudioOn,
       })
 
       setRemotePeers((prev) => {
         const updated = new Map(prev)
         const peer = updated.get(data.userId)
         if (peer) {
-          // Immutable update
-          updated.set(data.userId, {
-            ...peer,
-            isVideoOn: data.isVideoOn,
-            isAudioOn: data.isAudioOn
-          })
+          updated.set(data.userId, { ...peer, isVideoOn: data.isVideoOn, isAudioOn: data.isAudioOn })
         }
         return updated
       })
@@ -372,26 +354,16 @@ export function ParticipantsSidebar({
       }
     }
 
-    // When another user joins the call, send them an offer
     const handleUserJoinedCall = (data: { userId: string; roomId: string }) => {
       if (data.roomId !== roomId || data.userId === userId) return
 
       if (localStreamRef.current) {
-        console.log(`[WebRTC] User ${data.userId} joined call, sending offer`)
         createOfferToPeer(data.userId)
-
-        // Broadcast our state so the new user knows our status
         const { video, audio } = mediaStateRef.current
-        socket.emit("media-state-change", {
-          roomId,
-          userId,
-          isVideoOn: video,
-          isAudioOn: audio,
-        })
+        socket.emit("media-state-change", { roomId, userId, isVideoOn: video, isAudioOn: audio })
       }
     }
 
-    // Cleanup peer on leave
     const handleUserLeftCall = (data: { userId: string; roomId: string }) => {
       if (data.roomId !== roomId || data.userId === userId) return
       removePeer(data.userId)
@@ -403,6 +375,7 @@ export function ParticipantsSidebar({
     socket.on("user-media-state-changed", handleMediaStateChanged)
     socket.on("user-joined-call", handleUserJoinedCall)
     socket.on("user-left-call", handleUserLeftCall)
+    socket.on("call-users", handleCallUsers)
 
     return () => {
       socket.off("webrtc-offer", handleOffer)
@@ -411,6 +384,7 @@ export function ParticipantsSidebar({
       socket.off("user-media-state-changed", handleMediaStateChanged)
       socket.off("user-joined-call", handleUserJoinedCall)
       socket.off("user-left-call", handleUserLeftCall)
+      socket.off("call-users", handleCallUsers)
 
       remotePeersRef.current.forEach((peer) => {
         peer.peerConnection.close()
@@ -421,14 +395,11 @@ export function ParticipantsSidebar({
       remotePeersRef.current.clear()
       pendingCandidatesRef.current.clear()
     }
-  }, [roomId, userId, createPeerConnection, removePeer])
+  }, [roomId, userId, createPeerConnection, createOfferToPeer, removePeer])
 
-  // Auto-join call on mount
   useEffect(() => {
     const initCall = async () => {
       try {
-        console.log(`[WebRTC] Auto-starting call for ${userId}`)
-        // Start with no media
         localStreamRef.current = null
         setLocalStream(null)
         setIsVideoEnabled(false)
@@ -437,13 +408,7 @@ export function ParticipantsSidebar({
 
         const socket = getSocket()
         socket.emit("join-call", { roomId, userId })
-        socket.emit("media-state-change", {
-          roomId,
-          userId,
-          isVideoOn: false,
-          isAudioOn: false,
-        })
-
+        socket.emit("media-state-change", { roomId, userId, isVideoOn: false, isAudioOn: false })
       } catch (error) {
         console.error("Error starting WebRTC call:", error)
         setIsInitializing(false)
@@ -455,9 +420,8 @@ export function ParticipantsSidebar({
     }
 
     return () => {
-      // Cleanup local
       if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop())
+        localStreamRef.current.getTracks().forEach((track) => track.stop())
       }
       const socket = getSocket()
       socket.emit("leave-call", { roomId, userId })
@@ -474,10 +438,17 @@ export function ParticipantsSidebar({
       localStreamRef.current = stream
       setLocalStream(stream)
 
-      // Add tracks to existing peers and renegotiate
       remotePeersRef.current.forEach((peer, remoteUserId) => {
         stream.getTracks().forEach((track) => {
-          peer.peerConnection.addTrack(track, stream)
+          const transceiver = peer.peerConnection
+            .getTransceivers()
+            .find((t) => t.receiver.track?.kind === track.kind || t.sender.track?.kind === track.kind)
+          if (transceiver) {
+            transceiver.sender.replaceTrack(track)
+            transceiver.direction = "sendrecv"
+          } else {
+            peer.peerConnection.addTrack(track, stream)
+          }
         })
         createOfferToPeer(remoteUserId)
       })
@@ -493,8 +464,6 @@ export function ParticipantsSidebar({
     if (!localStream) {
       const stream = await startLocalStream()
       if (stream) {
-        // Video is enabled by default in new stream
-        // Sync audio with current state (should be false)
         stream.getAudioTracks().forEach((track) => {
           track.enabled = isAudioEnabled
         })
@@ -516,8 +485,6 @@ export function ParticipantsSidebar({
     if (!localStream) {
       const stream = await startLocalStream()
       if (stream) {
-        // Audio is enabled by default in new stream
-        // Sync video with current state (should be false)
         stream.getVideoTracks().forEach((track) => {
           track.enabled = isVideoEnabled
         })
@@ -535,7 +502,6 @@ export function ParticipantsSidebar({
     broadcastMediaState(isVideoEnabled, newState)
   }
 
-  // Ensure local video element has the stream when available
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream
@@ -543,8 +509,7 @@ export function ParticipantsSidebar({
   }, [localStream])
 
   return (
-    <div className="flex flex-col h-full ">
-      {/* Participants List */}
+    <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {isInitializing && (
           <div className="text-center text-xs text-muted-foreground py-2">
@@ -561,24 +526,21 @@ export function ParticipantsSidebar({
             .toUpperCase()
             .slice(0, 2)
 
-          // Determine video/audio state
-          // For local user, we use strict state
-          // For remote user, we prioritize the peer state over the participant list state if available
           const showVideo = isCurrentUser
             ? isVideoEnabled
-            : (remotePeer ? remotePeer.isVideoOn : participant.isVideoOn)
+            : remotePeer ? remotePeer.isVideoOn : participant.isVideoOn
 
           const hasAudio = isCurrentUser
             ? isAudioEnabled
-            : (remotePeer ? remotePeer.isAudioOn : participant.isAudioOn)
+            : remotePeer ? remotePeer.isAudioOn : participant.isAudioOn
 
           return (
             <div
               key={participant.id}
-              className={`rounded-lg overflow-hidden transition-all bg-card border ${isCurrentUser ? "ring-1 ring-primary" : ""
-                }`}
+              className={`rounded-lg overflow-hidden transition-all bg-card border ${
+                isCurrentUser ? "ring-1 ring-primary" : ""
+              }`}
             >
-              {/* Video/Avatar Area */}
               <div className="relative aspect-video bg-muted/50">
                 {isCurrentUser ? (
                   <>
@@ -587,7 +549,7 @@ export function ParticipantsSidebar({
                       autoPlay
                       playsInline
                       muted
-                      className={`w-full h-full object-cover ${!showVideo ? 'hidden' : ''}`}
+                      className={`w-full h-full object-cover ${!showVideo ? "hidden" : ""}`}
                       style={{ transform: "scaleX(-1)" }}
                     />
                     {!showVideo && (
@@ -632,12 +594,10 @@ export function ParticipantsSidebar({
                   </div>
                 )}
 
-                {/* Name Badge */}
                 <div className="absolute bottom-1 left-1 bg-black/60 backdrop-blur-sm px-1.5 py-0.5 rounded text-[10px] text-white flex items-center gap-1 max-w-[80%] truncate">
                   <span>{isCurrentUser ? "You" : participant.name}</span>
                 </div>
 
-                {/* Media Status Icons */}
                 <div className="absolute bottom-1 right-1 flex gap-1">
                   <div className={`p-0.5 rounded ${showVideo ? "bg-green-500/80" : "bg-red-500/80"}`}>
                     {showVideo ? (
@@ -660,38 +620,31 @@ export function ParticipantsSidebar({
         })}
       </div>
 
-      {/* Call Controls */}
       <div className="border-t bg-card/30 p-2">
         <div className="flex justify-center gap-2">
           <Button
             onClick={toggleVideo}
             size="sm"
             variant="outline"
-            className={`h-8 w-8 p-0 ${isVideoEnabled
-              ? "bg-gray-700 hover:bg-gray-600 text-white border-gray-600"
-              : "bg-red-600 hover:bg-red-700 text-white border-red-600"
-              }`}
+            className={`h-8 w-8 p-0 ${
+              isVideoEnabled
+                ? "bg-gray-700 hover:bg-gray-600 text-white border-gray-600"
+                : "bg-red-600 hover:bg-red-700 text-white border-red-600"
+            }`}
           >
-            {isVideoEnabled ? (
-              <Video className="w-4 h-4" />
-            ) : (
-              <VideoOff className="w-4 h-4" />
-            )}
+            {isVideoEnabled ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
           </Button>
           <Button
             onClick={toggleAudio}
             size="sm"
             variant="outline"
-            className={`h-8 w-8 p-0 ${isAudioEnabled
-              ? "bg-gray-700 hover:bg-gray-600 text-white border-gray-600"
-              : "bg-red-600 hover:bg-red-700 text-white border-red-600"
-              }`}
+            className={`h-8 w-8 p-0 ${
+              isAudioEnabled
+                ? "bg-gray-700 hover:bg-gray-600 text-white border-gray-600"
+                : "bg-red-600 hover:bg-red-700 text-white border-red-600"
+            }`}
           >
-            {isAudioEnabled ? (
-              <Mic className="w-4 h-4" />
-            ) : (
-              <MicOff className="w-4 h-4" />
-            )}
+            {isAudioEnabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
           </Button>
         </div>
       </div>
@@ -699,7 +652,7 @@ export function ParticipantsSidebar({
   )
 }
 
-// Remote video component sorted out to avoid re-renders of the main list breaking video reference
+// Isolated to prevent re-renders from losing the video srcObject reference
 function RemoteVideo({ stream, showVideo }: { stream: MediaStream; showVideo: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null)
 
@@ -714,7 +667,7 @@ function RemoteVideo({ stream, showVideo }: { stream: MediaStream; showVideo: bo
       ref={videoRef}
       autoPlay
       playsInline
-      className={`w-full h-full object-cover ${!showVideo ? 'hidden' : ''}`}
+      className={`w-full h-full object-cover ${!showVideo ? "hidden" : ""}`}
     />
   )
 }
