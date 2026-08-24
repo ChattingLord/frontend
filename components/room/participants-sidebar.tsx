@@ -75,8 +75,15 @@ export function ParticipantsSidebar({
   const remotePeersRef = useRef<Map<string, RemotePeer>>(new Map())
   const mediaStatesRef = useRef<Map<string, { isVideoOn: boolean; isAudioOn: boolean }>>(new Map())
   const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map())
+  const makingOfferRef = useRef<Map<string, boolean>>(new Map())
+  const pendingRenegotiateRef = useRef<Set<string>>(new Set())
   const localStreamRef = useRef<MediaStream | null>(null)
   const mediaStateRef = useRef({ video: false, audio: false })
+  const participantsRef = useRef(participants)
+
+  useEffect(() => {
+    participantsRef.current = participants
+  }, [participants])
 
   useEffect(() => {
     mediaStateRef.current = { video: isVideoEnabled, audio: isAudioEnabled }
@@ -145,19 +152,52 @@ export function ParticipantsSidebar({
         }
       }
 
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach((track) => {
-          pc.addTrack(track, localStreamRef.current!)
-        })
-      } else {
-        pc.addTransceiver("video", { direction: "recvonly" })
-        pc.addTransceiver("audio", { direction: "recvonly" })
-      }
-
       return pc
     },
     [roomId, userId]
   )
+
+  const attachLocalTracks = useCallback((pc: RTCPeerConnection) => {
+    const stream = localStreamRef.current
+
+    const kindOf = (t: RTCRtpTransceiver) =>
+      t.receiver.track?.kind || t.sender.track?.kind
+
+    const bindTrack = (kind: "video" | "audio", track: MediaStreamTrack | null) => {
+      const transceiver = pc.getTransceivers().find((t) => !t.stopped && kindOf(t) === kind)
+      if (!transceiver) return false
+      if (track) {
+        void transceiver.sender.replaceTrack(track)
+        transceiver.direction = "sendrecv"
+      }
+      return true
+    }
+
+    // Answerer: transceivers already exist from the remote offer.
+    if (pc.signalingState === "have-remote-offer" || pc.remoteDescription) {
+      if (stream) {
+        stream.getTracks().forEach((track) => {
+          bindTrack(track.kind as "video" | "audio", track)
+        })
+      }
+      return
+    }
+
+    // Offerer: put camera/mic on the connection so the new joiner receives them.
+    if (stream) {
+      stream.getTracks().forEach((track) => {
+        if (!bindTrack(track.kind as "video" | "audio", track)) {
+          pc.addTrack(track, stream)
+        }
+      })
+      return
+    }
+
+    if (pc.getTransceivers().length === 0) {
+      pc.addTransceiver("video", { direction: "recvonly" })
+      pc.addTransceiver("audio", { direction: "recvonly" })
+    }
+  }, [])
 
   const removePeer = useCallback((remoteUserId: string) => {
     const peer = remotePeersRef.current.get(remoteUserId)
@@ -174,44 +214,69 @@ export function ParticipantsSidebar({
       })
     }
     pendingCandidatesRef.current.delete(remoteUserId)
+    makingOfferRef.current.delete(remoteUserId)
+    pendingRenegotiateRef.current.delete(remoteUserId)
   }, [])
+
+  const ensurePeer = useCallback(
+    (remoteUserId: string): RemotePeer => {
+      let peer = remotePeersRef.current.get(remoteUserId)
+      if (peer) return peer
+
+      const savedState = mediaStatesRef.current.get(remoteUserId)
+      const participant = participantsRef.current.find((p) => p.id === remoteUserId)
+      peer = {
+        userId: remoteUserId,
+        stream: null,
+        peerConnection: createPeerConnection(remoteUserId),
+        isVideoOn: savedState?.isVideoOn ?? participant?.isVideoOn ?? false,
+        isAudioOn: savedState?.isAudioOn ?? participant?.isAudioOn ?? false,
+      }
+      remotePeersRef.current.set(remoteUserId, peer)
+      setRemotePeers(new Map(remotePeersRef.current))
+      return peer
+    },
+    [createPeerConnection]
+  )
 
   const createOfferToPeer = useCallback(
     async (remoteUserId: string) => {
       const socket = getSocket()
       try {
-        let peer = remotePeersRef.current.get(remoteUserId)
+        const peer = ensurePeer(remoteUserId)
+        const pc = peer.peerConnection
 
-        if (!peer) {
-          const pc = createPeerConnection(remoteUserId)
-          const savedState = mediaStatesRef.current.get(remoteUserId)
-          const participant = participants.find((p) => p.id === remoteUserId)
-
-          peer = {
-            userId: remoteUserId,
-            stream: null,
-            peerConnection: pc,
-            isVideoOn: savedState?.isVideoOn ?? participant?.isVideoOn ?? false,
-            isAudioOn: savedState?.isAudioOn ?? participant?.isAudioOn ?? false,
-          }
-          remotePeersRef.current.set(remoteUserId, peer)
-          setRemotePeers(new Map(remotePeersRef.current))
+        // Only one offer in flight. Queue another pass once signaling is stable
+        // so we never apply a stale answer (that causes the SSL-role error).
+        if (makingOfferRef.current.get(remoteUserId) || pc.signalingState !== "stable") {
+          pendingRenegotiateRef.current.add(remoteUserId)
+          return
         }
 
-        const offer = await peer.peerConnection.createOffer()
-        await peer.peerConnection.setLocalDescription(offer)
-
-        socket.emit("webrtc-offer", {
-          roomId,
-          fromUserId: userId,
-          toUserId: remoteUserId,
-          sdp: peer.peerConnection.localDescription,
-        })
+        makingOfferRef.current.set(remoteUserId, true)
+        try {
+          attachLocalTracks(pc)
+          const offer = await pc.createOffer()
+          if (pc.signalingState !== "stable") {
+            pendingRenegotiateRef.current.add(remoteUserId)
+            return
+          }
+          await pc.setLocalDescription(offer)
+          socket.emit("webrtc-offer", {
+            roomId,
+            fromUserId: userId,
+            toUserId: remoteUserId,
+            sdp: pc.localDescription,
+          })
+        } finally {
+          makingOfferRef.current.set(remoteUserId, false)
+        }
       } catch (error) {
         console.error(`[WebRTC] Error creating offer to ${remoteUserId}:`, error)
+        makingOfferRef.current.set(remoteUserId, false)
       }
     },
-    [roomId, userId, createPeerConnection]
+    [roomId, userId, ensurePeer, attachLocalTracks]
   )
 
   useEffect(() => {
@@ -219,44 +284,48 @@ export function ParticipantsSidebar({
 
     const handleCallUsers = (data: { roomId: string; users: string[] }) => {
       if (data.roomId !== roomId) return
-      // Joiner creates offers to everyone already in the call
-      data.users.forEach((existingUserId) => {
-        if (existingUserId && existingUserId !== userId) {
-          createOfferToPeer(existingUserId)
-        }
-      })
+      // The joiner waits. People already in the call send offers (they hold
+      // the live camera tracks), same idea as Meet: publishers push to the new viewer.
     }
 
     const handleOffer = async (data: WebRTCOfferAnswerPayload) => {
       if (data.roomId !== roomId || data.toUserId !== userId) return
 
       try {
-        let peer = remotePeersRef.current.get(data.fromUserId)
+        const peer = ensurePeer(data.fromUserId)
+        const pc = peer.peerConnection
 
-        if (!peer) {
-          const pc = createPeerConnection(data.fromUserId)
-          const savedState = mediaStatesRef.current.get(data.fromUserId)
-          const participant = participants.find((p) => p.id === data.fromUserId)
+        // Perfect negotiation: the lexicographically smaller userId yields
+        // (polite) so both sides offering at once cannot flip DTLS roles.
+        const polite = userId < data.fromUserId
+        const offerCollision =
+          makingOfferRef.current.get(data.fromUserId) === true || pc.signalingState !== "stable"
 
-          peer = {
-            userId: data.fromUserId,
-            stream: null,
-            peerConnection: pc,
-            isVideoOn: savedState?.isVideoOn ?? participant?.isVideoOn ?? false,
-            isAudioOn: savedState?.isAudioOn ?? participant?.isAudioOn ?? false,
+        if (offerCollision) {
+          if (!polite) {
+            pendingRenegotiateRef.current.add(data.fromUserId)
+            return
           }
-          remotePeersRef.current.set(data.fromUserId, peer)
-          setRemotePeers(new Map(remotePeersRef.current))
+          pendingRenegotiateRef.current.add(data.fromUserId)
+          try {
+            await pc.setLocalDescription({ type: "rollback" })
+          } catch {
+            return
+          }
         }
 
-        await peer.peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp))
-        const answer = await peer.peerConnection.createAnswer()
-        await peer.peerConnection.setLocalDescription(answer)
+        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
+        // Bind existing camera/mic to the transceivers created by the remote
+        // offer. Adding transceivers before setRemoteDescription puts tracks
+        // on extra m-lines, so the joiner never receives media.
+        attachLocalTracks(pc)
+        const answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
 
         const pending = pendingCandidatesRef.current.get(data.fromUserId) || []
         for (const candidate of pending) {
           try {
-            await peer.peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
+            await pc.addIceCandidate(new RTCIceCandidate(candidate))
           } catch (err) {
             console.error("[WebRTC] Error adding queued ICE candidate:", err)
           }
@@ -267,12 +336,16 @@ export function ParticipantsSidebar({
           roomId,
           fromUserId: userId,
           toUserId: data.fromUserId,
-          sdp: peer.peerConnection.localDescription,
+          sdp: pc.localDescription,
         })
 
-        // Broadcast our media state to the new caller
         const { video, audio } = mediaStateRef.current
         socket.emit("media-state-change", { roomId, userId, isVideoOn: video, isAudioOn: audio })
+
+        if (pendingRenegotiateRef.current.has(data.fromUserId)) {
+          pendingRenegotiateRef.current.delete(data.fromUserId)
+          void createOfferToPeer(data.fromUserId)
+        }
       } catch (error) {
         console.error("[WebRTC] Error handling WebRTC offer:", error)
       }
@@ -298,6 +371,11 @@ export function ParticipantsSidebar({
           }
         }
         pendingCandidatesRef.current.delete(data.fromUserId)
+
+        if (pendingRenegotiateRef.current.has(data.fromUserId)) {
+          pendingRenegotiateRef.current.delete(data.fromUserId)
+          void createOfferToPeer(data.fromUserId)
+        }
       } catch (error) {
         console.error("[WebRTC] Error handling WebRTC answer:", error)
       }
@@ -357,11 +435,9 @@ export function ParticipantsSidebar({
     const handleUserJoinedCall = (data: { userId: string; roomId: string }) => {
       if (data.roomId !== roomId || data.userId === userId) return
 
-      if (localStreamRef.current) {
-        createOfferToPeer(data.userId)
-        const { video, audio } = mediaStateRef.current
-        socket.emit("media-state-change", { roomId, userId, isVideoOn: video, isAudioOn: audio })
-      }
+      void createOfferToPeer(data.userId)
+      const { video, audio } = mediaStateRef.current
+      socket.emit("media-state-change", { roomId, userId, isVideoOn: video, isAudioOn: audio })
     }
 
     const handleUserLeftCall = (data: { userId: string; roomId: string }) => {
@@ -395,7 +471,7 @@ export function ParticipantsSidebar({
       remotePeersRef.current.clear()
       pendingCandidatesRef.current.clear()
     }
-  }, [roomId, userId, createPeerConnection, createOfferToPeer, removePeer])
+  }, [roomId, userId, createOfferToPeer, ensurePeer, removePeer, attachLocalTracks])
 
   useEffect(() => {
     const initCall = async () => {
@@ -440,15 +516,16 @@ export function ParticipantsSidebar({
 
       remotePeersRef.current.forEach((peer, remoteUserId) => {
         stream.getTracks().forEach((track) => {
+          // Always use replaceTrack so we never add a new m-line and break
+          // the established m-line order from the first offer/answer.
           const transceiver = peer.peerConnection
             .getTransceivers()
-            .find((t) => t.receiver.track?.kind === track.kind || t.sender.track?.kind === track.kind)
+            .find((t) => !t.stopped && (t.receiver.track?.kind === track.kind || t.sender.track?.kind === track.kind))
           if (transceiver) {
-            transceiver.sender.replaceTrack(track)
+            void transceiver.sender.replaceTrack(track)
             transceiver.direction = "sendrecv"
-          } else {
-            peer.peerConnection.addTrack(track, stream)
           }
+          // No addTrack fallback — transceivers were pre-created in createPeerConnection.
         })
         createOfferToPeer(remoteUserId)
       })
@@ -526,9 +603,13 @@ export function ParticipantsSidebar({
             .toUpperCase()
             .slice(0, 2)
 
+          const remoteHasLiveVideo = !!remotePeer?.stream
+            ?.getVideoTracks()
+            .some((t) => t.readyState === "live")
+
           const showVideo = isCurrentUser
             ? isVideoEnabled
-            : remotePeer ? remotePeer.isVideoOn : participant.isVideoOn
+            : remoteHasLiveVideo || (remotePeer ? remotePeer.isVideoOn : participant.isVideoOn)
 
           const hasAudio = isCurrentUser
             ? isAudioEnabled
