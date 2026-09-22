@@ -122,28 +122,27 @@ export function ParticipantsSidebar({
       pc.ontrack = (event) => {
         let [stream] = event.streams
         if (!stream) {
-          // Some browsers fire ontrack without event.streams populated.
-          // Build a stable MediaStream per remote peer from incoming tracks.
           const existing = remotePeersRef.current.get(remoteUserId)?.stream
           stream = existing ?? new MediaStream()
-          stream.addTrack(event.track)
-        }
-        if (!stream) return
-
-        setRemotePeers((prev) => {
-          const updated = new Map(prev)
-          const peer = updated.get(remoteUserId)
-          if (peer) {
-            updated.set(remoteUserId, { ...peer, stream })
+          if (!stream.getTracks().includes(event.track)) {
+            stream.addTrack(event.track)
           }
-          return updated
-        })
+        }
 
         const existingPeer = remotePeersRef.current.get(remoteUserId)
         if (existingPeer) {
           existingPeer.stream = stream
           remotePeersRef.current.set(remoteUserId, existingPeer)
         }
+
+        setRemotePeers((prev) => {
+          const updated = new Map(prev)
+          const peer = updated.get(remoteUserId) ?? existingPeer
+          if (peer) {
+            updated.set(remoteUserId, { ...peer, stream })
+          }
+          return updated
+        })
       }
 
       pc.onconnectionstatechange = () => {
@@ -157,46 +156,39 @@ export function ParticipantsSidebar({
     [roomId, userId]
   )
 
-  const attachLocalTracks = useCallback((pc: RTCPeerConnection) => {
+  const attachLocalTracks = useCallback((pc: RTCPeerConnection, asAnswerer: boolean) => {
     const stream = localStreamRef.current
 
     const kindOf = (t: RTCRtpTransceiver) =>
       t.receiver.track?.kind || t.sender.track?.kind
 
-    const bindTrack = (kind: "video" | "audio", track: MediaStreamTrack | null) => {
-      const transceiver = pc.getTransceivers().find((t) => t.currentDirection !== "stopped" && kindOf(t) === kind)
+    const bindTrack = (kind: "video" | "audio", track: MediaStreamTrack) => {
+      const transceiver = pc
+        .getTransceivers()
+        .find((t) => t.currentDirection !== "stopped" && kindOf(t) === kind)
       if (!transceiver) return false
-      if (track) {
-        void transceiver.sender.replaceTrack(track)
-        transceiver.direction = "sendrecv"
-      }
+      void transceiver.sender.replaceTrack(track)
+      transceiver.direction = "sendrecv"
       return true
     }
 
-    // Answerer: transceivers already exist from the remote offer.
-    if (pc.signalingState === "have-remote-offer" || pc.remoteDescription) {
-      if (stream) {
-        stream.getTracks().forEach((track) => {
-          bindTrack(track.kind as "video" | "audio", track)
-        })
+    if (!stream) {
+      // Offerer with no local media yet: still create recv m-lines so we can
+      // receive the remote camera as soon as they publish.
+      if (!asAnswerer && pc.getTransceivers().length === 0) {
+        pc.addTransceiver("video", { direction: "recvonly" })
+        pc.addTransceiver("audio", { direction: "recvonly" })
       }
       return
     }
 
-    // Offerer: put camera/mic on the connection so the new joiner receives them.
-    if (stream) {
-      stream.getTracks().forEach((track) => {
-        if (!bindTrack(track.kind as "video" | "audio", track)) {
-          pc.addTrack(track, stream)
-        }
-      })
-      return
-    }
-
-    if (pc.getTransceivers().length === 0) {
-      pc.addTransceiver("video", { direction: "recvonly" })
-      pc.addTransceiver("audio", { direction: "recvonly" })
-    }
+    stream.getTracks().forEach((track) => {
+      if (bindTrack(track.kind as "video" | "audio", track)) return
+      // Answerer must not invent new m-lines; offerer may add missing senders.
+      if (!asAnswerer) {
+        pc.addTrack(track, stream)
+      }
+    })
   }, [])
 
   const removePeer = useCallback((remoteUserId: string) => {
@@ -255,7 +247,7 @@ export function ParticipantsSidebar({
 
         makingOfferRef.current.set(remoteUserId, true)
         try {
-          attachLocalTracks(pc)
+          attachLocalTracks(pc, false)
           const offer = await pc.createOffer()
           if (pc.signalingState !== "stable") {
             pendingRenegotiateRef.current.add(remoteUserId)
@@ -318,7 +310,7 @@ export function ParticipantsSidebar({
         // Bind existing camera/mic to the transceivers created by the remote
         // offer. Adding transceivers before setRemoteDescription puts tracks
         // on extra m-lines, so the joiner never receives media.
-        attachLocalTracks(pc)
+        attachLocalTracks(pc, true)
         const answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
 
@@ -504,31 +496,65 @@ export function ParticipantsSidebar({
     }
   }, [roomId, userId, isJoined])
 
-  const startLocalStream = async () => {
+  const replaceSenderTrack = (
+    kind: "video" | "audio",
+    track: MediaStreamTrack | null
+  ) => {
+    let needsOffer = false
+    remotePeersRef.current.forEach((peer) => {
+      const pc = peer.peerConnection
+      const transceiver = pc
+        .getTransceivers()
+        .find(
+          (t) =>
+            t.currentDirection !== "stopped" &&
+            (t.receiver.track?.kind === kind || t.sender.track?.kind === kind)
+        )
+      if (transceiver) {
+        void transceiver.sender.replaceTrack(track)
+        if (track) transceiver.direction = "sendrecv"
+      } else if (track && localStreamRef.current) {
+        pc.addTrack(track, localStreamRef.current)
+        needsOffer = true
+      }
+    })
+    return needsOffer
+  }
+
+  const renegotiateAllPeers = () => {
+    remotePeersRef.current.forEach((_, remoteUserId) => {
+      createOfferToPeer(remoteUserId)
+    })
+  }
+
+  const startLocalStream = async (opts: { video?: boolean; audio?: boolean } = { video: true, audio: true }) => {
     try {
+      const wantVideo = opts.video ?? true
+      const wantAudio = opts.audio ?? true
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 320 }, height: { ideal: 240 } },
-        audio: true,
+        video: wantVideo ? { width: { ideal: 320 }, height: { ideal: 240 } } : false,
+        audio: wantAudio,
       })
+
+      const existing = localStreamRef.current
+      if (existing) {
+        stream.getTracks().forEach((track) => {
+          existing.addTrack(track)
+          replaceSenderTrack(track.kind as "video" | "audio", track)
+        })
+        setLocalStream(existing)
+        // Always renegotiate when (re)publishing a camera so remotes get frames
+        renegotiateAllPeers()
+        return existing
+      }
 
       localStreamRef.current = stream
       setLocalStream(stream)
 
-      remotePeersRef.current.forEach((peer, remoteUserId) => {
-        stream.getTracks().forEach((track) => {
-          // Always use replaceTrack so we never add a new m-line and break
-          // the established m-line order from the first offer/answer.
-          const transceiver = peer.peerConnection
-            .getTransceivers()
-            .find((t) => t.currentDirection !== "stopped" && (t.receiver.track?.kind === track.kind || t.sender.track?.kind === track.kind))
-          if (transceiver) {
-            void transceiver.sender.replaceTrack(track)
-            transceiver.direction = "sendrecv"
-          }
-          // No addTrack fallback — transceivers were pre-created in createPeerConnection.
-        })
-        createOfferToPeer(remoteUserId)
+      stream.getTracks().forEach((track) => {
+        replaceSenderTrack(track.kind as "video" | "audio", track)
       })
+      renegotiateAllPeers()
 
       return stream
     } catch (error) {
@@ -537,46 +563,87 @@ export function ParticipantsSidebar({
     }
   }
 
+  const stopVideoTracks = () => {
+    const stream = localStreamRef.current
+    if (!stream) return
+
+    stream.getVideoTracks().forEach((track) => {
+      track.stop() // releases the camera hardware / LED
+      stream.removeTrack(track)
+    })
+
+    replaceSenderTrack("video", null)
+
+    if (stream.getTracks().length === 0) {
+      localStreamRef.current = null
+      setLocalStream(null)
+      if (localVideoRef.current) localVideoRef.current.srcObject = null
+    } else {
+      setLocalStream(stream)
+    }
+  }
+
   const toggleVideo = async () => {
-    if (!localStream) {
-      const stream = await startLocalStream()
-      if (stream) {
+    if (!isVideoEnabled) {
+      // Turning camera ON — acquire a fresh video track (releases on next off)
+      const hasLiveVideo = !!localStreamRef.current
+        ?.getVideoTracks()
+        .some((t) => t.readyState === "live")
+
+      if (!hasLiveVideo) {
+        const stream = await startLocalStream({
+          video: true,
+          audio: !localStreamRef.current?.getAudioTracks().some((t) => t.readyState === "live"),
+        })
+        if (!stream) return
         stream.getAudioTracks().forEach((track) => {
           track.enabled = isAudioEnabled
         })
-        setIsVideoEnabled(true)
-        broadcastMediaState(true, isAudioEnabled)
       }
+
+      setIsVideoEnabled(true)
+      broadcastMediaState(true, isAudioEnabled)
       return
     }
 
-    const newState = !isVideoEnabled
-    localStream.getVideoTracks().forEach((track) => {
-      track.enabled = newState
-    })
-    setIsVideoEnabled(newState)
-    broadcastMediaState(newState, isAudioEnabled)
+    // Turning camera OFF — stop the track so the site releases the camera
+    stopVideoTracks()
+    setIsVideoEnabled(false)
+    broadcastMediaState(false, isAudioEnabled)
   }
 
   const toggleAudio = async () => {
-    if (!localStream) {
-      const stream = await startLocalStream()
-      if (stream) {
+    if (!isAudioEnabled) {
+      const hasLiveAudio = !!localStreamRef.current
+        ?.getAudioTracks()
+        .some((t) => t.readyState === "live")
+
+      if (!hasLiveAudio) {
+        const stream = await startLocalStream({
+          video: !localStreamRef.current?.getVideoTracks().some((t) => t.readyState === "live"),
+          audio: true,
+        })
+        if (!stream) return
         stream.getVideoTracks().forEach((track) => {
           track.enabled = isVideoEnabled
         })
-        setIsAudioEnabled(true)
-        broadcastMediaState(isVideoEnabled, true)
+      } else {
+        localStreamRef.current!.getAudioTracks().forEach((track) => {
+          track.enabled = true
+        })
       }
+
+      setIsAudioEnabled(true)
+      broadcastMediaState(isVideoEnabled, true)
       return
     }
 
-    const newState = !isAudioEnabled
-    localStream.getAudioTracks().forEach((track) => {
-      track.enabled = newState
+    // Mute mic without releasing the device (no LED to worry about); keep track for quick unmute
+    localStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = false
     })
-    setIsAudioEnabled(newState)
-    broadcastMediaState(isVideoEnabled, newState)
+    setIsAudioEnabled(false)
+    broadcastMediaState(isVideoEnabled, false)
   }
 
   useEffect(() => {
@@ -603,17 +670,19 @@ export function ParticipantsSidebar({
             .toUpperCase()
             .slice(0, 2)
 
-          const remoteHasLiveVideo = !!remotePeer?.stream
-            ?.getVideoTracks()
-            .some((t) => t.readyState === "live")
-
+          // Hide when they signal video off (avoids frozen last frame).
+          // Show only when state says on — stream may arrive a moment later.
           const showVideo = isCurrentUser
             ? isVideoEnabled
-            : remoteHasLiveVideo || (remotePeer ? remotePeer.isVideoOn : participant.isVideoOn)
+            : remotePeer
+              ? remotePeer.isVideoOn
+              : !!participant.isVideoOn
 
           const hasAudio = isCurrentUser
             ? isAudioEnabled
-            : remotePeer ? remotePeer.isAudioOn : participant.isAudioOn
+            : remotePeer
+              ? remotePeer.isAudioOn
+              : !!participant.isAudioOn
 
           return (
             <div
@@ -742,6 +811,17 @@ function RemoteVideo({ stream, showVideo }: { stream: MediaStream; showVideo: bo
       videoRef.current.srcObject = stream
     }
   }, [stream])
+
+  useEffect(() => {
+    const el = videoRef.current
+    if (!el) return
+    if (showVideo) {
+      void el.play().catch(() => {})
+    } else {
+      // Pausing avoids a visible frozen last frame under the avatar overlay
+      el.pause()
+    }
+  }, [showVideo])
 
   return (
     <video
